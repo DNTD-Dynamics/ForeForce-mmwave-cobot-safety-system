@@ -32,7 +32,7 @@ dntd_mmwave_driver:
     # The validated profile_AOP.cfg is correct for IWR6843AOP.
     # Do not use xwr68xx_mmw_demo.bin config — ISK firmware only.
     # -------------------------------------------------------------------------
-    config_file: "/home/nic/mmwave/configs/profile_AOP.cfg"
+    config_file: "~/mmwave/configs/profile_AOP.cfg"
 
     # Send chirp config to sensor on startup (true = normal operation)
     # Set false only if sensor is already streaming (debug sessions)
