@@ -148,4 +148,4 @@ dntd_mmwave_safety:
     output_use_gpio: false
 
     # MQTT broker for Sterling integration
-    output_mqtt_broker: ""   # e.g. "192.168.254.117"
+    output_mqtt_broker: ""   # e.g. "0.0.0.0"
