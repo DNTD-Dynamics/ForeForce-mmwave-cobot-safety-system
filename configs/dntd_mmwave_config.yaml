@@ -1,0 +1,151 @@
+# dntd_mmwave_config.yaml
+# DNTD Dynamics — mmWave Safety Node Configuration
+#
+# This file configures the safety node (dntd_mmwave_safety_node.py).
+# For the driver/sensor config see dntd_mmwave_driver_config.yaml.
+#
+# Deploy: ~/mmwave/configs/dntd_mmwave_config.yaml
+# Run with:
+#   python3 dntd_mmwave_safety_node.py \
+#     --ros-args --params-file ~/mmwave/configs/dntd_mmwave_config.yaml \
+#                -r /dntd/mmwave/raw_points:=/mmwave/raw_points
+
+dntd_mmwave_safety:
+  ros__parameters:
+
+    # -------------------------------------------------------------------------
+    # SENSOR MOUNT
+    # Which URDF link is the sensor rigidly attached to?
+    # Examples:
+    #   UR5 / UR10:   "tool0"
+    #   xArm6:        "link6"
+    #   Custom arm:   whatever you named the forearm or shoulder link
+    #   Humanoid:     "torso_link" or "chest_link"
+    #   Stick test:   "base_link" (sensor is stationary)
+    # -------------------------------------------------------------------------
+    sensor_mount_link: "tool0"
+
+    # XYZ offset (meters) from mount link origin to sensor origin
+    sensor_mount_xyz: [0.0, 0.0, 0.05]
+
+    # RPY rotation (radians) from mount link frame to sensor frame
+    sensor_mount_rpy: [0.0, 0.0, 0.0]
+
+
+    # -------------------------------------------------------------------------
+    # KINEMATIC CHAIN
+    # Joint names must match your URDF exactly.
+    # For stick testing, leave as-is — fake_joint_states.py publishes these.
+    # -------------------------------------------------------------------------
+    joint_names:
+      - "joint1"
+      - "joint2"
+      - "joint3"
+      - "joint4"
+      - "joint5"
+      - "joint6"
+
+    joint_geometry:
+      joint1:
+        type: revolute
+        origin_xyz: [0.0, 0.0, 0.127]
+        origin_rpy: [0.0, 0.0, 0.0]
+        axis: [0.0, 0.0, 1.0]
+      joint2:
+        type: revolute
+        origin_xyz: [0.0, 0.0, 0.0]
+        origin_rpy: [1.5708, 0.0, 0.0]
+        axis: [0.0, 1.0, 0.0]
+      joint3:
+        type: revolute
+        origin_xyz: [0.425, 0.0, 0.0]
+        origin_rpy: [0.0, 0.0, 0.0]
+        axis: [0.0, 1.0, 0.0]
+      joint4:
+        type: revolute
+        origin_xyz: [0.392, 0.0, 0.0]
+        origin_rpy: [1.5708, 0.0, 0.0]
+        axis: [0.0, 0.0, 1.0]
+      joint5:
+        type: revolute
+        origin_xyz: [0.0, 0.109, 0.0]
+        origin_rpy: [-1.5708, 0.0, 0.0]
+        axis: [0.0, 1.0, 0.0]
+      joint6:
+        type: revolute
+        origin_xyz: [0.0, -0.093, 0.0]
+        origin_rpy: [1.5708, 0.0, 0.0]
+        axis: [0.0, 0.0, 1.0]
+
+
+    # -------------------------------------------------------------------------
+    # TIMING
+    # -------------------------------------------------------------------------
+    interpolate_joint_states: true
+    joint_states_timeout_s: 0.5
+    heartbeat_hz: 5.0
+
+
+    # -------------------------------------------------------------------------
+    # ZONE GEOMETRY (meters)
+    # Tune these to match your arm's reach and operating environment.
+    #
+    # Tuning guide:
+    #   stop_range_m    — minimum safe clearance at max arm speed
+    #                     start at 0.5m, reduce only after controlled testing
+    #   caution_range_m — should give enough time to decelerate
+    #                     typically 2-3x stop_range
+    #   fast_approach_mps — lower = more sensitive (more false positives)
+    #                       0.8 m/s ≈ brisk walk / stumble speed
+    #                       raise for industrial environments with fast workers
+    # -------------------------------------------------------------------------
+    stop_range_m:       0.5
+    caution_range_m:    1.2
+    fast_approach_mps:  -0.8
+    min_snr_db:         8.0
+
+
+    # -------------------------------------------------------------------------
+    # BACKGROUND LEARNING
+    #
+    # The sensor learns the static environment (walls, fixtures, arm mount)
+    # during startup. After learning, only novel objects (people, tools)
+    # trigger zone responses. The arm will hold STOP during learning.
+    #
+    # background_learning_s — how long to learn the static scene
+    #   Tune this for your environment:
+    #   - Small controlled lab:    5–10s
+    #   - Typical workshop:        15s  (default)
+    #   - Cluttered environment:   30s
+    #   - Complex changing space:  30s+ with continuous decay
+    #
+    # background_voxel_size_m — spatial resolution of background grid (meters)
+    #   Smaller = finer detail but more memory. 0.10m (10cm) suits most arms.
+    #   Reduce to 0.05m for precision work near cluttered surfaces.
+    #
+    # background_hit_threshold — fraction of learning frames a voxel must
+    #   appear in to count as background (0.0–1.0).
+    #   Lower = more aggressive masking (may mask slow-moving objects).
+    #   Higher = stricter (walls may not fully mask if sensor vibrates).
+    #   0.30 (30% of frames) is a safe default.
+    # -------------------------------------------------------------------------
+    background_learning_s:    15.0
+    background_voxel_size_m:  0.10
+    background_hit_threshold: 0.30
+
+
+    # -------------------------------------------------------------------------
+    # OUTPUT INTERFACES
+    # All optional — leave blank/false to disable.
+    # Serial, GPIO, and MQTT publish simultaneously if configured.
+    # -------------------------------------------------------------------------
+
+    # Serial: "CLEAR\n" / "CAUTION\n" / "STOP\n"
+    # Examples: "/dev/ttyACM0" (Arduino), "/dev/ttyS0" (Pi UART)
+    output_serial_port: ""
+
+    # GPIO (Raspberry Pi BCM only): pin 17=CLEAR, 27=CAUTION, 22=STOP
+    output_use_gpio: false
+
+    # MQTT broker for Sterling integration
+    output_mqtt_broker: ""   # e.g. "192.168.254.117"

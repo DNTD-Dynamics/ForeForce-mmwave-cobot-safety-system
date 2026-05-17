@@ -1,0 +1,61 @@
+# dntd_mmwave_driver_config.yaml
+# DNTD Dynamics — mmWave Driver Node Configuration
+#
+# This file configures the driver node (dntd_mmwave_driver_node.py).
+# For safety zones, joints, and background learning see dntd_mmwave_config.yaml.
+#
+# One config file per physical sensor — copy and rename for each:
+#   sensor_0.yaml → /dev/ttyUSB0 + /dev/ttyUSB1
+#   sensor_1.yaml → /dev/ttyUSB2 + /dev/ttyUSB3
+#   sensor_2.yaml → /dev/ttyUSB4 + /dev/ttyUSB5
+
+dntd_mmwave_driver:
+  ros__parameters:
+
+    # -------------------------------------------------------------------------
+    # UART PORTS
+    # Each Silicon Labs CP2105 (on the EVM) exposes two serial ports.
+    # cli_port  = Enhanced COM port = CLI commands (115200 baud)
+    # data_port = Standard COM port = TLV frame stream (921600 baud)
+    #
+    # Verify enumeration after plugging in: ls /dev/ttyUSB*
+    # Use udev rules for stable names with multiple sensors (see README).
+    # -------------------------------------------------------------------------
+    cli_port:  "/dev/ttyUSB0"
+    cli_baud:  115200
+
+    data_port: "/dev/ttyUSB1"
+    data_baud: 921600
+
+    # -------------------------------------------------------------------------
+    # SENSOR CONFIG FILE
+    # The validated profile_AOP.cfg is correct for IWR6843AOP.
+    # Do not use xwr68xx_mmw_demo.bin config — ISK firmware only.
+    # -------------------------------------------------------------------------
+    config_file: "/home/nic/mmwave/configs/profile_AOP.cfg"
+
+    # Send chirp config to sensor on startup (true = normal operation)
+    # Set false only if sensor is already streaming (debug sessions)
+    send_config: true
+
+    # Retry config send once if any command returns Error
+    config_retry: true
+
+    # -------------------------------------------------------------------------
+    # ROS 2
+    # sensor_frame_id must match the TF frame for this sensor's mount link.
+    # Each sensor needs a unique frame_id.
+    # -------------------------------------------------------------------------
+    sensor_frame_id: "mmwave_sensor"
+
+    # -------------------------------------------------------------------------
+    # SENSOR MODEL
+    # Affects diagnostics labeling only — IWR6843AOP and IWRL6432AOP
+    # use identical TLV frame format and the same driver node.
+    # Options: iwr6843aop | iwrl6432aop
+    # -------------------------------------------------------------------------
+    sensor_model: "iwr6843aop"
+
+    # Expected frame rate in Hz — for diagnostics staleness detection only.
+    # frameCfg period 100ms = 10 Hz (matches profile_AOP.cfg)
+    publish_hz: 10.0
