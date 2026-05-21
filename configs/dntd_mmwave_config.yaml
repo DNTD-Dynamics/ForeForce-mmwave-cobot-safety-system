@@ -188,4 +188,45 @@ dntd_mmwave_safety:
     output_use_gpio: false
 
     # MQTT broker for Sterling integration
+
+
+    # -------------------------------------------------------------------------
+    # SWEPT-VOLUME WORKSPACE CLIPPER
+    #
+    # Defines the reachable workspace of the arm from the sensor mount point.
+    # Detections outside the reachable envelope are suppressed — the arm
+    # physically cannot reach them so they are not a safety concern.
+    # Detections inside the self-exclusion zone are the arm's own body.
+    #
+    # This is what makes arm-mounted mmWave fundamentally different from
+    # fixed-mount sensors — the system knows its own geometry.
+    #
+    # Hardware configuration (3× IWR6843AOP on forearm):
+    #   Sensors mount on the forearm link between joint 3 and joint 4.
+    #   mount_joint_idx: 3 (0-indexed, so joint 4 on a 6-DOF arm)
+    #
+    # swept_volume_max_reach_m:
+    #   0.0 = auto-compute from kinematic chain link lengths (recommended)
+    #   Set manually if auto-compute doesn't match your physical arm.
+    #   Measured from the mount joint origin to the end effector tip.
+    #
+    # swept_volume_self_radius_m:
+    #   Exclusion sphere around the mount point — suppresses returns
+    #   from the arm's own body. Set to roughly half the arm link diameter.
+    #   Default 0.15m suits most 6-DOF collaborative arms.
+    #
+    # swept_volume_reach_margin_m:
+    #   Safety margin added to max reach. Catches detections just outside
+    #   the nominal boundary. Default 0.20m recommended.
+    #
+    # swept_volume_enabled:
+    #   Set false to bypass entirely — all points pass through unfiltered.
+    #   Use during initial setup/tuning to verify classifier behavior first.
+    # -------------------------------------------------------------------------
+    swept_volume_enabled:         true
+    swept_volume_mount_joint_idx: 3      # forearm link (joint 4 on 6-DOF arm)
+    swept_volume_max_reach_m:     0.0    # 0 = auto-compute from chain geometry
+    swept_volume_self_radius_m:   0.15   # arm body exclusion radius
+    swept_volume_reach_margin_m:  0.20   # safety margin beyond nominal reach
+
     output_mqtt_broker: ""   # e.g. "0.0.0.0"

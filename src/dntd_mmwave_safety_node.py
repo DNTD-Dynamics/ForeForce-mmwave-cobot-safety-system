@@ -45,6 +45,7 @@ from zone_logic import ZoneClassifier, ZoneOutputs, DetectedPoint, ZoneState
 from background_model import BackgroundModel
 from cluster import ClusterBuilder
 from classifier import MicroDopplerClassifier
+from swept_volume import SweptVolumeClipper
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +384,13 @@ class DntdMmwaveSafetyNode(Node):
         self.declare_parameter('classifier_score_threshold',     2)
         self.declare_parameter('classifier_log_enabled',         True)
         self.declare_parameter('classifier_eps_m',               0.40)
+
+        # Swept-volume workspace clipper parameters
+        self.declare_parameter('swept_volume_enabled',        True)
+        self.declare_parameter('swept_volume_mount_joint_idx', 3)
+        self.declare_parameter('swept_volume_max_reach_m',    0.0)   # 0 = auto
+        self.declare_parameter('swept_volume_self_radius_m',  0.15)
+        self.declare_parameter('swept_volume_reach_margin_m', 0.20)
 	
         # --- Load parameters ---
         p = self._params()
@@ -419,6 +427,16 @@ class DntdMmwaveSafetyNode(Node):
             enable_logging = self.get_parameter('classifier_log_enabled').value,
         )
         self._classifier_enabled = self.get_parameter('classifier_enabled').value
+
+        # Swept-volume workspace clipper
+        self._swept_volume = SweptVolumeClipper(
+            chain            = self._chain,
+            mount_joint_idx  = self.get_parameter('swept_volume_mount_joint_idx').value,
+            max_reach_m      = self.get_parameter('swept_volume_max_reach_m').value,
+            self_radius_m    = self.get_parameter('swept_volume_self_radius_m').value,
+            reach_margin_m   = self.get_parameter('swept_volume_reach_margin_m').value,
+            enabled          = self.get_parameter('swept_volume_enabled').value,
+        )
 
         self._classifier  = ZoneClassifier(
             stop_range    = p['stop_range_m'],
@@ -489,7 +507,10 @@ class DntdMmwaveSafetyNode(Node):
             f"  stop / caution    : {p['stop_range_m']}m / {p['caution_range_m']}m\n"
             f"  fast approach     : {p['fast_approach_mps']} m/s\n"
             f"  heartbeat         : {p['heartbeat_hz']} Hz\n"
-            f"  classifier        : {'enabled' if self._classifier_enabled else 'disabled'}"
+            f"  classifier        : {'enabled' if self._classifier_enabled else 'disabled'}\n"
+            f"  swept volume      : {'enabled' if self.get_parameter('swept_volume_enabled').value else 'disabled'} "
+            f"(mount joint {self.get_parameter('swept_volume_mount_joint_idx').value})\n"
+            f"  max reach         : {self._swept_volume.max_reach_m + self.get_parameter('swept_volume_reach_margin_m').value:.3f}m (incl. margin)"
         )
 
     # ------------------------------------------------------------------
@@ -569,7 +590,12 @@ class DntdMmwaveSafetyNode(Node):
         else:
             zone_points = novel_points
 
-        # Zone classification on classifier-filtered points
+        # Swept-volume workspace clip — suppress detections outside arm reach
+        # mount_joint_idx=3 → sensors on forearm between joint 3 and 4
+        # Only detections within the distal arm's reachable envelope pass through
+        zone_points, _ = self._swept_volume.filter(zone_points, q)
+
+        # Zone classification on workspace-clipped points
         state = self._classifier.update_frame(zone_points)
 
         # Publish zone + downstream outputs
