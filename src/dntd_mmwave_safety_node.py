@@ -43,6 +43,8 @@ import sensor_msgs_py.point_cloud2 as pc2
 
 from zone_logic import ZoneClassifier, ZoneOutputs, DetectedPoint, ZoneState
 from background_model import BackgroundModel
+from cluster import ClusterBuilder
+from classifier import MicroDopplerClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +373,16 @@ class DntdMmwaveSafetyNode(Node):
         self.declare_parameter('background_voxel_size_m', 0.10)
         self.declare_parameter('background_learning_s', 15.0)
         self.declare_parameter('background_hit_threshold', 0.30)
+
+        # Micro-doppler classifier parameters
+        self.declare_parameter('classifier_enabled',             True)
+        self.declare_parameter('classifier_min_points',          2)
+        self.declare_parameter('classifier_velocity_spread_min', 0.08)
+        self.declare_parameter('classifier_height_span_min',     0.10)
+        self.declare_parameter('classifier_point_count_min',     3)
+        self.declare_parameter('classifier_score_threshold',     2)
+        self.declare_parameter('classifier_log_enabled',         True)
+        self.declare_parameter('classifier_eps_m',               0.40)
 	
         # --- Load parameters ---
         p = self._params()
@@ -391,6 +403,23 @@ class DntdMmwaveSafetyNode(Node):
             learning_duration_s  = self.get_parameter('background_learning_s').value,
             hit_threshold        = self.get_parameter('background_hit_threshold').value,
 	)
+        # Cluster builder and micro-doppler classifier
+        self._cluster_builder = ClusterBuilder(
+            eps_m      = self.get_parameter('classifier_eps_m').value,
+        )
+        clf_thresholds = {
+            'min_points_to_classify':      self.get_parameter('classifier_min_points').value,
+            'person_velocity_spread_min':  self.get_parameter('classifier_velocity_spread_min').value,
+            'person_height_span_min':      self.get_parameter('classifier_height_span_min').value,
+            'person_point_count_min':      self.get_parameter('classifier_point_count_min').value,
+            'person_score_threshold':      self.get_parameter('classifier_score_threshold').value,
+        }
+        self._micro_doppler = MicroDopplerClassifier(
+            thresholds     = clf_thresholds,
+            enable_logging = self.get_parameter('classifier_log_enabled').value,
+        )
+        self._classifier_enabled = self.get_parameter('classifier_enabled').value
+
         self._classifier  = ZoneClassifier(
             stop_range    = p['stop_range_m'],
             caution_range = p['caution_range_m'],
@@ -459,7 +488,8 @@ class DntdMmwaveSafetyNode(Node):
             f"  joints            : {p['joint_names']}\n"
             f"  stop / caution    : {p['stop_range_m']}m / {p['caution_range_m']}m\n"
             f"  fast approach     : {p['fast_approach_mps']} m/s\n"
-            f"  heartbeat         : {p['heartbeat_hz']} Hz"
+            f"  heartbeat         : {p['heartbeat_hz']} Hz\n"
+            f"  classifier        : {'enabled' if self._classifier_enabled else 'disabled'}"
         )
 
     # ------------------------------------------------------------------
@@ -517,8 +547,30 @@ class DntdMmwaveSafetyNode(Node):
         self._pub_comp.publish(
             self._encode_pointcloud(novel_points, msg.header))
 
-        # Zone classification on novel points only
-        state = self._classifier.update_frame(novel_points)
+        # Micro-doppler classification — group into clusters, label each
+        # PERSON/UNKNOWN pass through (fail-safe), OBJECT is suppressed
+        if self._classifier_enabled and novel_points:
+            clusters      = self._cluster_builder.update(novel_points)
+            safe_clusters = self._micro_doppler.filter_person_clusters(clusters)
+            # Reconstruct point list from safe clusters only
+            # Zone classifier still works on DetectedPoints — unchanged interface
+            safe_points = [
+                pt for pt in novel_points
+                if any(
+                    abs(pt.x - c.centroid_x) <= 0.5 and
+                    abs(pt.y - c.centroid_y) <= 0.5 and
+                    abs(pt.z - c.centroid_z) <= 0.5
+                    for c in safe_clusters
+                )
+            ] if safe_clusters else []
+            # Fail-safe: if classifier suppressed everything but we had novel
+            # points, pass originals through rather than falsely reporting CLEAR
+            zone_points = safe_points if safe_points else novel_points
+        else:
+            zone_points = novel_points
+
+        # Zone classification on classifier-filtered points
+        state = self._classifier.update_frame(zone_points)
 
         # Publish zone + downstream outputs
         self._publish_zone(state.zone)
@@ -715,6 +767,7 @@ def main(args=None):
         pass
     finally:
         node._outputs.cleanup()
+        node._micro_doppler.cleanup()
         node.destroy_node()
         rclpy.shutdown()
 

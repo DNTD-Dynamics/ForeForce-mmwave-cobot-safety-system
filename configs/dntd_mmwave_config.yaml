@@ -8,6 +8,7 @@
 # Run with:
 #   python3 dntd_mmwave_safety_node.py \
 #     --ros-args --params-file ~/mmwave/configs/dntd_mmwave_config.yaml \
+#                --params-file ~/mmwave/configs/dntd_mmwave_config.local.yaml \
 #                -r /dntd/mmwave/raw_points:=/mmwave/raw_points
 
 dntd_mmwave_safety:
@@ -132,6 +133,45 @@ dntd_mmwave_safety:
     background_learning_s:    15.0
     background_voxel_size_m:  0.10
     background_hit_threshold: 0.30
+
+
+    # -------------------------------------------------------------------------
+    # MICRO-DOPPLER CLASSIFIER
+    #
+    # Rule-based classifier that distinguishes people from objects (falling
+    # tools, vibrating equipment, debris) using cluster features extracted
+    # from the novel point cloud.
+    #
+    # Safety stance: FAIL-SAFE
+    #   PERSON  → passes to zone logic normally
+    #   UNKNOWN → passes to zone logic (treated as PERSON)
+    #   OBJECT  → suppressed, logged to ~/mmwave/logs/classifier_training.csv
+    #
+    # classifier_enabled — set false to bypass entirely (all novel points
+    #   pass through unfiltered, original behavior restored)
+    #
+    # Tuning guide:
+    #   velocity_spread_min — lower = more sensitive (more false positives)
+    #                         raise if stationary equipment gets flagged
+    #   height_span_min     — lower = catches crouching people
+    #                         raise if floor-level clutter causes false positives
+    #   score_threshold     — 1 = very sensitive, 4 = very strict
+    #                         2 (default) is conservative fail-safe
+    #   eps_m               — DBSCAN cluster radius. Raise for sparser clouds.
+    #
+    # Training data:
+    #   classifier_log_enabled=true automatically logs suppressed OBJECT
+    #   detections to CSV. This builds your labeled dataset for Phase 6b
+    #   ML model training without any extra work.
+    # -------------------------------------------------------------------------
+    classifier_enabled:             true
+    classifier_eps_m:               0.40
+    classifier_min_points:          2
+    classifier_velocity_spread_min: 0.08
+    classifier_height_span_min:     0.10
+    classifier_point_count_min:     3
+    classifier_score_threshold:     2
+    classifier_log_enabled:         true   # logs suppressed objects for ML training
 
 
     # -------------------------------------------------------------------------
