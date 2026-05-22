@@ -2,256 +2,392 @@
 
 **Real-time human presence detection and collision avoidance for robot arms and mobile robots, powered by mmWave radar.**
 
-Built by [DNTD Dynamics](https://dntddynamics.com) · Licensed under [BSL 1.1](#license)
+Built by [DNTD Dynamics](https://dntddynamics.com) · [contact@dntddynamics.com](mailto:contact@dntddynamics.com) · Licensed under [BSL 1.1](#license)
 
 ---
 
 ## What is this?
 
-RadarGuard is an open-source safety system that uses mmWave radar to detect people in a robot's workspace and output **CLEAR / CAUTION / STOP** zone commands in real time.
+RadarGuard is an open-source mmWave radar safety system for collaborative robot arms and mobile robots. Unlike fixed-mount proximity sensors, **RadarGuard mounts on the arm itself** — moving with it, tracking the workspace the arm can actually reach, and suppressing false triggers for parts of the environment the arm cannot physically contact.
 
-Unlike camera-based safety systems, mmWave radar:
-- Works in complete darkness, dust, smoke, and welding flash
-- Detects stationary people — not just movement
-- Carries no PII — a radar return is not a face
-- Runs at 10Hz with sub-100ms zone transition latency
-
-RadarGuard is designed to be **plug-and-play with any robot arm**. Drop in your URDF, set your zone distances in a YAML file, and run. No code changes required.
+Walk into the arm's swept workspace → the arm slows, then stops. Step back out → it resumes. No cameras, no LiDAR, no safety PLC required.
 
 ---
 
-## Hardware Requirements
+## Why mmWave?
 
-| Component | Part | Source |
-|-----------|------|--------|
-| mmWave sensor | Texas Instruments IWR6843AOPEVM | DigiKey / Mouser (~$179) |
-| Compute | Jetson Orin Nano / NX, Raspberry Pi 5, or any Ubuntu 22.04 ARM/x86 board | — |
-| Cable | USB-A to USB-B (standard) | — |
-
-**Coming soon:** IWRL6432AOP support for battery-powered mobile robots and humanoids.
+- Works in dust, weld smoke, and variable lighting — environments where cameras fail
+- Detects stationary people via background subtraction — not just moving targets
+- Doppler velocity data enables human vs. object classification
+- Sensor mounts directly on the forearm link — moves with the arm, knows where the arm is
+- No privacy concerns — no images, no video, no identifiable data
 
 ---
 
-## How it works
+## What makes this different?
+
+Most mmWave safety work is fixed-mount: sensor on the wall, uniform detection sphere around the robot. RadarGuard is arm-mounted and kinematics-aware.
+
+| Capability | Fixed-mount sensor | RadarGuard |
+|------------|-------------------|------------|
+| Sensor moves with arm | ✗ | ✅ |
+| Kinematic workspace clipping | ✗ | ✅ |
+| Stationary person detection | ✗ | ✅ |
+| Human vs. object classification | ✗ | ✅ |
+| Persistent background map | ✗ | ✅ |
+| YAML config for any arm | ✗ | ✅ |
+| Hardware-agnostic outputs | ✗ | ✅ |
+| Open source | rarely | ✅ |
+
+**Swept-volume workspace clipping** is the headline feature: RadarGuard computes the arm's full reachable envelope every frame from live joint angles. A detection three meters behind the base — unreachable — is suppressed. A detection at full extension directly in front of the end effector triggers a stop. Fixed-mount sensors cannot make this distinction.
+
+---
+
+## Hardware
+
+### Validated — Industrial Fixed Arm
+
+| Component | Details |
+|-----------|---------|
+| Sensor | TI IWR6843AOPEVM |
+| Config | `profile_AOP.cfg` — 10Hz, ±60° FOV |
+| Mount | Forearm link (between joint 3 and joint 4), 3× sensors at 120° for 360° coverage |
+| Compute | Jetson Orin Nano Super (primary) · Raspberry Pi 5 (1–3 sensors, no ML classifier) |
+| Output | ROS 2 · Serial · GPIO · MQTT — all simultaneous |
+
+A single IWR6843AOPEVM is enough to get started. The 3-sensor 360° array is Phase 8.
+
+### In Progress — Mobile Robot
+
+| Component | Details |
+|-----------|---------|
+| Sensor | TI IWRL6432AOPEVM (3 units on order) |
+| Notes | Same TLV format — same parser, same driver node. New challenge: whole-platform ego-motion. Udopproc DPU available for raw range-doppler heatmap. Almost no open-source work on this chip. |
+
+### Demo / Validation Arm — ToolBox Robotics EB300
+
+| Component | Details |
+|-----------|---------|
+| Design | Open source 6-DOF arm · [Thingiverse](https://www.thingiverse.com/thing:6283770) |
+| Motors | Nema 17 (joints 1–3) · Nema 23 (joints 4–6) |
+| Drivers | 6× TB6600 stepper driver |
+| Controller | ESP32 DEVKITV1 |
+| Limit switches | KW12-3 SPDT roller lever (NC wiring, fail-safe) |
+
+---
+
+## How It Works
 
 ```
-IWR6843AOP sensor (UART)
-        ↓
-  Driver node — decodes TLV frames → PointCloud2
-        ↓
-  Safety node — ego-motion compensation + background learning + zone classification
-        ↓
-  CLEAR / CAUTION / STOP
-        ├── ROS 2 topic  (/dntd/safety_zone)
-        ├── Serial UART  (Arduino, any microcontroller)
-        ├── GPIO pins    (Raspberry Pi)
-        └── MQTT         (home automation, custom integrations)
+IWR6843AOP UART (up to 3× sensors, forearm mount)
+      ↓
+dntd_mmwave_driver_node.py
+  MmwaveReader → TLV frame decode → PointCloud2
+      ↓
+dntd_mmwave_safety_node.py
+  ← /joint_states  (ESP32 arm controller or fake_joint_states.py)
+  → Ego-motion compensation      removes arm-induced Doppler shift
+  → Background model             learns static scene, detects stationary people
+       Persistent map: saved to disk, reloaded on boot
+       Novelty gate: stationary people never absorbed into background
+  → DBSCAN cluster builder       groups novel points into tracked objects
+  → Micro-doppler classifier     PERSON / OBJECT / UNKNOWN (fail-safe)
+       OBJECT suppressed + logged to classifier_training.csv
+  → Swept-volume workspace clip  suppresses detections outside reachable envelope
+       Mount point: world-frame position of forearm sensor mount joint
+       Self-exclusion: arm body returns suppressed
+       Max reach: auto-computed from kinematic chain or YAML override
+  → Zone classification          CLEAR / CAUTION / STOP
+  Publishes: /dntd/safety_zone · /dntd/safety_fault · /dntd/heartbeat
+  Outputs:   Serial · GPIO · MQTT (simultaneous)
 ```
 
-**Ego-motion compensation** — the sensor can be mounted on the moving arm itself. RadarGuard reads `/joint_states` from your ROS 2 controller and subtracts the arm's own velocity from every radar return, so only real-world motion triggers zone changes.
+### Zone Behavior
 
-**Background learning** — on startup, RadarGuard learns the static environment (walls, fixtures, the arm mount). After learning, only novel objects trigger responses. A person standing still in the danger zone holds CAUTION — they don't disappear when they stop moving.
+| Zone | Trigger | Arm Response |
+|------|---------|-------------|
+| CLEAR | No detection in workspace | Normal operation |
+| CAUTION | Detection in outer zone (default 1.2m) | Slow down |
+| STOP | Detection in inner zone (default 0.5m) or fast approach | Halt — hold until explicit resume |
 
-**Hardware-agnostic outputs** — your arm controller doesn't need to speak ROS 2. Serial, GPIO, and MQTT outputs work simultaneously so any downstream controller can consume the safety signal.
+STOP requires an explicit resume signal (`/dntd/safety_resume`) — it does not auto-clear. A stationary person in the stop zone holds the stop indefinitely; they are never absorbed into the background.
+
+---
+
+## Arm Controller
+
+The arm controller bridges the ESP32 stepper firmware to the ROS 2 pipeline.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `src/radarguard_arm_controller.ino` | ESP32 firmware — step/dir pulse gen, homing, serial joint state publisher |
+| `src/arm_controller_node.py` | Jetson ROS 2 bridge — serial → `/joint_states` |
+| `src/arm_controller_gui.py` | Desktop GUI — joint selector, jog, sweep, speed, stop |
+
+### ESP32 Serial Commands
+
+| Command | Description |
+|---------|-------------|
+| `HOME` | Home all joints in sequence |
+| `HOME <n>` | Home single joint 0–5 |
+| `JOG <n> <steps>` | Jog joint n by ±steps |
+| `SWEEP <n> <steps> <count>` | Sweep joint n ±steps, count times |
+| `SPEED <n> <us>` | Set step period for joint n (µs, lower = faster) |
+| `SPEED ALL <us>` | Set step period for all joints |
+| `STATUS` | Print step counts, angles, limit states |
+| `STOP` | Halt all motion immediately |
+
+Microstep resolution is set by a single define at the top of the firmware:
+
+```cpp
+#define MICROSTEP_DIVISOR  8   // match your TB6600 DIP switches: 1/2/4/8/16/32
+```
+
+All steps-per-degree math adjusts automatically.
+
+### ROS 2 Commands (from Jetson terminal)
+
+```bash
+ros2 topic pub --once /arm_cmd std_msgs/String "data: 'HOME'"
+ros2 topic pub --once /arm_cmd std_msgs/String "data: 'SWEEP 0 800 10'"
+ros2 topic pub --once /arm_cmd std_msgs/String "data: 'STOP'"
+```
+
+Or launch the GUI:
+
+```bash
+cd src && python3 arm_controller_gui.py
+```
 
 ---
 
 ## Quickstart
 
-### 1. Hardware setup
-
-Mount the IWR6843AOPEVM with the heat shield (antenna face) pointing outward into the workspace. Connect via USB.
-
-Verify detection:
-```bash
-ls /dev/ttyUSB*
-# Should show /dev/ttyUSB0 (CLI) and /dev/ttyUSB1 (data)
-```
-
-### 2. Install dependencies
+### 1. Install dependencies
 
 ```bash
 # ROS 2 Humble (Ubuntu 22.04)
-sudo apt install ros-humble-ros-base ros-humble-rosbridge-suite \
-                 ros-humble-sensor-msgs ros-humble-sensor-msgs-py
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-source ~/.bashrc
+sudo apt install ros-humble-ros-base ros-humble-sensor-msgs-py
 
-# Python dependencies
-pip3 install pyserial numpy
+# Python
+pip3 install pyserial numpy scipy
 ```
 
-### 3. Clone and configure
+### 2. Clone
 
 ```bash
-git clone https://github.com/ShireFolk/mmwave-cobot-safety.git
-cd mmwave-cobot-safety
+git clone git@github.com:DNTD-Dynamics/RadarGuard-mmwave-cobot-safety-system.git
+cd RadarGuard-mmwave-cobot-safety-system
 ```
 
-Edit `configs/dntd_mmwave_config.yaml`:
+### 3. Configure
+
+Copy and edit the config for your arm and environment:
+
+```bash
+cp configs/dntd_mmwave_config.yaml configs/dntd_mmwave_config.local.yaml
+```
+
+Key parameters to set in your local config:
+
 ```yaml
-# Set your URDF link name for the sensor mount
-sensor_mount_link: "tool0"       # UR5/UR10 default
+stop_range_m: 0.5              # hard stop radius
+caution_range_m: 1.2           # slow-down radius
+background_learning_s: 15.0    # scene learning duration on boot
 
-# Tune zone distances for your arm
-stop_range_m:    0.5             # hard stop radius
-caution_range_m: 1.2             # slow-down radius
+classifier_enabled: true        # set false to bypass classifier
+swept_volume_enabled: true      # set false to bypass workspace clipping
+swept_volume_mount_joint_idx: 3 # forearm link joint index
 
-# Background learning duration (seconds)
-# Longer = more thorough static environment mask
-background_learning_s: 15.0
+output_mqtt_broker: "192.168.x.x"  # set in .local.yaml — never commit IP
 ```
 
-### 4. Run
+### 4. Flash the ESP32 (if using physical arm)
+
+Open `src/radarguard_arm_controller.ino` in Arduino IDE. Set `MICROSTEP_DIVISOR` to match your TB6600 DIP switches. Select board **ESP32 Dev Module**, flash.
+
+See [MOTOR_TEST_GUIDE.md](MOTOR_TEST_GUIDE.md) for full wiring instructions and commissioning steps.
+
+### 5. Run the stack
 
 ```bash
-# Terminal 1 — sensor driver
+# Terminal 1 — arm controller bridge (or fake_joint_states.py for stick test)
+cd src && python3 arm_controller_node.py
+
+# Terminal 2 — mmWave driver
 cd src && python3 dntd_mmwave_driver_node.py
 
-# Terminal 2 — safety node
+# Terminal 3 — safety node
 cd src && python3 dntd_mmwave_safety_node.py \
-  --ros-args -r /dntd/mmwave/raw_points:=/mmwave/raw_points
+  --ros-args \
+  --params-file configs/dntd_mmwave_config.yaml \
+  --params-file configs/dntd_mmwave_config.local.yaml \
+  -r /dntd/mmwave/raw_points:=/mmwave/raw_points
 
-# Terminal 3 — watch zone output
+# Terminal 4 — monitor
 ros2 topic echo /dntd/safety_zone
 ```
 
-Stand clear during the 15-second background learning phase. After learning completes, walk toward the sensor — you will see `CLEAR → CAUTION → STOP` transitions.
+### 6. First boot — background learning
 
-Send resume after any fault:
+On first boot no background map exists. Clear the startup fault and trigger a clean learn from outside the FOV:
+
 ```bash
 ros2 topic pub --once /dntd/safety_resume std_msgs/Bool "data: true"
+ros2 topic pub --once /dntd/relearn_background std_msgs/Bool "data: true"
 ```
 
----
+The map saves automatically after 15 seconds. Subsequent boots skip the learning period.
 
-## Adapting to your arm
+### 7. Optional — GUI controller
 
-All arm-specific geometry lives in `configs/dntd_mmwave_config.yaml`. No Python changes required.
-
-**Step 1** — Set `sensor_mount_link` to the URDF link the sensor is attached to:
-```yaml
-sensor_mount_link: "tool0"        # UR5, UR10
-sensor_mount_link: "link6"        # xArm6
-sensor_mount_link: "torso_link"   # humanoid chest mount
-```
-
-**Step 2** — Set `sensor_mount_xyz` and `sensor_mount_rpy` to the physical offset from that link to the sensor face (measure with calipers or read from CAD).
-
-**Step 3** — Copy your joint names and DH parameters into the `joint_geometry` block. Values come directly from your URDF `<joint>` elements.
-
-**Step 4** — Tune `stop_range_m` and `caution_range_m` to match your arm's reach envelope and maximum speed.
-
----
-
-## Key parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `stop_range_m` | 0.5m | Hard stop — anything inside this range triggers immediate STOP |
-| `caution_range_m` | 1.2m | Slow down — anything inside this range triggers CAUTION |
-| `fast_approach_mps` | -0.8 m/s | Emergency stop velocity threshold — catches stumbles and falls |
-| `background_learning_s` | 15s | Scene learning duration. Increase for cluttered environments |
-| `hysteresis_frames` | 3 | Frames to confirm zone upgrade. Increase to reduce boundary oscillation |
-| `clear_hysteresis_frames` | 6 | Frames to confirm zone downgrade. Higher = safer resume after STOP |
-| `min_snr_db` | 8.0 dB | Minimum SNR for valid detection |
-
----
-
-## ROS 2 topics
-
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/dntd/safety_zone` | String | `CLEAR` / `CAUTION` / `STOP` |
-| `/dntd/safety_fault` | String | Fault reason, empty when healthy |
-| `/dntd/heartbeat` | Header | 5Hz watchdog pulse — subscribe in your controller |
-| `/dntd/compensated_points` | PointCloud2 | Ego-motion compensated world-frame point cloud |
-| `/dntd/safety_resume` | Bool | Send `true` to resume after fault |
-| `/dntd/relearn_background` | Bool | Send `true` to retrigger background learning |
-
----
-
-## Supported hardware
-
-| Sensor | Status | Notes |
-|--------|--------|-------|
-| IWR6843AOPEVM | ✅ Validated | Primary development platform |
-| IWRL6432AOPEVM | 🔲 In progress | Battery-powered / mobile robot variant |
-
-| Compute platform | Status |
-|-----------------|--------|
-| Jetson Orin Nano Super (JetPack 6.2.2) | ✅ Validated |
-| Raspberry Pi 5 (Ubuntu 22.04) | ✅ Compatible |
-| Any Ubuntu 22.04 ARM/x86 | ✅ Compatible |
-
----
-
-## Fault handling
-
-RadarGuard fails safe. If `/joint_states` stops publishing (arm controller crash, E-stop, cable fault), the system immediately publishes `STOP` and raises a fault on `/dntd/safety_fault`.
-
-**Recovery requires an explicit resume** — the arm will not restart automatically when the fault clears:
 ```bash
-ros2 topic pub --once /dntd/safety_resume std_msgs/Bool "data: true"
+cd src && python3 arm_controller_gui.py
 ```
 
-Your arm controller should also subscribe to `/dntd/heartbeat`. If the heartbeat stops (RadarGuard process dies), the controller should independently STOP without waiting to be told.
+Provides joint selector, jog/sweep controls, speed slider, live angle readout, and a timestamped command console.
+
+---
+
+## ROS 2 Topics
+
+| Topic | Direction | Type | Description |
+|-------|-----------|------|-------------|
+| `/mmwave/raw_points` | driver → safety | PointCloud2 | Raw sensor frames ~19Hz |
+| `/mmwave/diagnostics` | driver → | DiagnosticStatus | Sensor health |
+| `/joint_states` | arm/fake → safety | JointState | Ego-motion input — 10Hz |
+| `/arm_cmd` | → arm node | String | Serial command passthrough |
+| `/dntd/safety_zone` | safety → | String | CLEAR / CAUTION / STOP |
+| `/dntd/safety_fault` | safety → | String | Fault reason or empty |
+| `/dntd/heartbeat` | safety → | Header | 5Hz watchdog pulse |
+| `/dntd/compensated_points` | safety → | PointCloud2 | World-frame cloud |
+| `/dntd/safety_resume` | → safety | Bool | Clear fault, resume arm |
+| `/dntd/relearn_background` | → safety | Bool | Force fresh background learn |
+
+---
+
+## Key YAML Parameters
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `stop_range_m` | 0.5 | Hard stop radius |
+| `caution_range_m` | 1.2 | Slow-down radius |
+| `fast_approach_mps` | -0.8 | Emergency stop velocity threshold |
+| `min_snr_db` | 8.0 | Minimum detection quality |
+| `background_learning_s` | 15.0 | Scene learning duration |
+| `background_voxel_size_m` | 0.10 | 10cm voxel resolution |
+| `hysteresis_frames` | 3 | Frames to confirm zone upgrade |
+| `clear_hysteresis_frames` | 6 | Frames to confirm zone downgrade |
+| `classifier_enabled` | true | Set false to bypass classifier |
+| `classifier_eps_m` | 0.40 | DBSCAN cluster radius |
+| `classifier_score_threshold` | 2 | Votes needed for PERSON label (1–4) |
+| `classifier_log_enabled` | true | Log suppressed objects to CSV |
+| `swept_volume_enabled` | true | Set false to bypass workspace clipping |
+| `swept_volume_mount_joint_idx` | 3 | Forearm link index in kinematic chain |
+| `swept_volume_self_radius_m` | 0.15 | Arm body self-exclusion sphere |
+| `swept_volume_reach_margin_m` | 0.20 | Safety buffer added to max reach |
+| `output_mqtt_broker` | "" | Set in .local.yaml — never commit IP |
+
+---
+
+## Compute Requirements
+
+| Platform | Sensors | Classifier | Notes |
+|----------|---------|-----------|-------|
+| Jetson Orin Nano Super | 3× | ✅ | Primary target — runs full stack at 10Hz |
+| Raspberry Pi 5 | 1–3× | ✅ rule-based | Handles current stack; ML classifier needs Jetson |
+| Any Ubuntu 22.04 ARM/x86 | 1× | ✅ | No Jetson-specific dependencies |
+
+---
+
+## Fault Handling
+
+| Fault | Cause | Recovery |
+|-------|-------|---------|
+| `JOINT_STATES_TIMEOUT` | `/joint_states` not received within 2s | Publish to `/dntd/safety_resume` |
+| `ALL_POINTS_SUPPRESSED` | Swept volume clipped all detections | Check YAML geometry — fail-safe passes originals |
+| `SENSOR_DISCONNECT` | Driver node stops publishing | Reconnect sensor, restart driver node |
+
+All faults latch to STOP and require explicit resume. The 5Hz heartbeat on `/dntd/heartbeat` lets the arm controller self-stop if the safety node dies.
+
+---
+
+## File Structure
+
+```
+RadarGuard-mmwave-cobot-safety-system/
+├── configs/
+│   ├── profile_AOP.cfg                  Validated IWR6843AOP chirp config
+│   ├── dntd_mmwave_config.yaml          Safety node parameters (public)
+│   ├── dntd_mmwave_config.local.yaml    Local overrides — gitignored
+│   ├── dntd_mmwave_driver_config.yaml   Driver node parameters
+│   └── background_map.npz              Persistent background map — gitignored
+├── logs/
+│   └── classifier_training.csv         Auto-logged OBJECT suppressions — gitignored
+├── src/
+│   ├── tlv_parser.py                   TLV frame decoder
+│   ├── uart_reader.py                  MmwaveReader UART reader
+│   ├── zone_logic.py                   Zone classifier + ZoneOutputs
+│   ├── background_model.py             Voxel background + persistence
+│   ├── cluster.py                      DBSCAN cluster builder + features
+│   ├── classifier.py                   Micro-doppler rule-based classifier
+│   ├── swept_volume.py                 Swept-volume workspace clipper
+│   ├── dntd_mmwave_driver_node.py      UART → PointCloud2 ROS 2 node
+│   ├── dntd_mmwave_safety_node.py      Full pipeline ROS 2 node
+│   ├── dntd_mmwave_launch.py           Multi-sensor launch file
+│   ├── fake_joint_states.py            No-arm stick test helper
+│   ├── arm_controller_node.py          ESP32 → /joint_states ROS 2 bridge
+│   ├── arm_controller_gui.py           Desktop GUI controller
+│   ├── radarguard_arm_controller.ino   ESP32 stepper firmware
+│   └── main.py                         Standalone runner (no ROS 2)
+├── MOTOR_TEST_GUIDE.md                 Single motor and full 6-axis wiring + commissioning
+├── README.md
+└── LICENSE                             BSL 1.1
+```
 
 ---
 
 ## Roadmap
 
-- [x] IWR6843AOP driver and TLV parser
-- [x] ROS 2 pipeline (Humble)
-- [x] Ego-motion compensation via URDF Jacobian
-- [x] Background scene learning with continuous decay
-- [x] Motionless person detection
-- [x] Hardware-agnostic outputs (serial / GPIO / MQTT)
-- [x] Configurable hysteresis and zone parameters
-- [ ] Micro-doppler classifier — person vs. object discrimination
-- [ ] Forward kinematics swept-volume intersection (predictive safety)
-- [ ] 3-sensor 360° array fusion
-- [ ] IWRL6432AOP pipeline (battery-powered and mobile robots)
-- [ ] Persistent background map (no relearn on boot)
-- [ ] systemd auto-start on boot
-- [ ] FCC Part 15.255 certification
-
----
-
-## Commercial use
-
-RadarGuard is free for research, education, and non-commercial projects under the [Business Source License 1.1](LICENSE).
-
-Commercial use requires a license from DNTD Dynamics.
-Contact: **contact@dntddynamics.com**
-
-Commercial use includes any product, service, or internal tooling that generates revenue or is deployed in a production environment.
-
----
-
-## Contributing
-
-Issues, pull requests, and hardware compatibility reports are welcome.
-
-If you've validated RadarGuard on a new arm or platform, open a PR to add it to the supported hardware table. If you hit a blocker getting it running, open an issue — the setup process has sharp edges and your report helps the next person.
-
----
-
-## About
-
-RadarGuard is developed by [DNTD Dynamics](https://dntddynamics.com), a robotics and dynamics engineering company based in Snohomish, Washington.
-
-Built because the gap between "mmWave chip exists" and "working safety system a researcher can deploy in an afternoon" was too wide and too important to leave open.
+```
+✅ Phase 1  — Hardware validation (IWR6843AOP, TLV, FOV)
+✅ Phase 2  — ROS 2 pipeline (driver, safety node, ego-motion)
+✅ Phase 3  — Background learning, motionless detection, YAML config
+✅ Phase 4  — README, BSL 1.1 license, GitHub public release
+✅ Phase 5  — Persistent background map, novelty-aware refresh gate
+✅ Phase 6  — Micro-doppler classifier (rule-based, fail-safe, training logger)
+✅ Phase 7  — Swept-volume workspace clipper (forearm mount, 3× IWR6843AOP config)
+── Phase 6b — ML classifier (drop-in upgrade, RadIOCD dataset + workspace data)
+── Phase 8  — 3-sensor 360° fusion (EVMs arriving)
+── Phase 9  — IWRL6432AOP pipeline (mobile robot, ego-motion, Udopproc DPU)
+── Phase 10 — Custom PCB (IWRL6432AOP, power-optimized, robot flange mount)
+── Phase 11 — FCC Part 15.255 + ISO 13849 functional safety path
+── Future   — Heartbeat detection during STOP zone
+── Future   — Payload / tool extension awareness
+── Future   — Occlusion awareness (blind spots → fail-safe CAUTION)
+── Future   — Asymmetric zone shapes (arm-reach-direction aware)
+```
 
 ---
 
 ## License
 
-Business Source License 1.1
+RadarGuard is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 
-- **Non-commercial use:** Free — research, education, personal projects
-- **Commercial use:** Requires a license from DNTD Dynamics
-- **Change date:** Four years from first tagged release
-- **Change license:** Apache 2.0 (becomes fully open after change date)
+- **Free for non-commercial use** — research, education, personal projects, evaluation
+- **Commercial use** requires a license from DNTD Dynamics — [contact@dntddynamics.com](mailto:contact@dntddynamics.com)
+- **Change date:** 4 years from first public release → Apache 2.0
 
 See [LICENSE](LICENSE) for full terms.
+
+> Note: BSL 1.1 and Boost Software License are different licenses. This project uses BSL 1.1 only.
+
+---
+
+## About DNTD Dynamics
+
+DNTD Dynamics is a robotics and dynamics engineering company based in Snohomish, Washington, building open, accessible tools for collaborative robotics and industrial automation.
+
+[dntddynamics.com](https://dntddynamics.com) · [contact@dntddynamics.com](mailto:contact@dntddynamics.com)
