@@ -388,6 +388,6 @@ See [LICENSE](LICENSE) for full terms.
 
 ## About DNTD Dynamics
 
-DNTD Dynamics is a robotics and dynamics engineering company based in Snohomish, Washington, building open, accessible tools for collaborative robotics and industrial automation.
+DNTD Dynamics is an independent hardware research from the Pacific Northwest. Building sensing and analysis systems for robotics, ecology, and biosystems for a wider more open source community.
 
 [dntddynamics.com](https://dntddynamics.com) · [contact@dntddynamics.com](mailto:contact@dntddynamics.com)
