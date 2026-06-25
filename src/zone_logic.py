@@ -147,10 +147,25 @@ class ZoneClassifier:
         """
         Core classification logic. Returns (zone, reason, closest, fastest, count).
         No hysteresis here — raw per-frame decision only.
+
+        Two-stage filter applied before classification:
+          1. SNR gate  — drops noise returns below min_snr threshold
+          2. Velocity gate (static_filter) — drops near-static returns
+             (walls, fixtures, mount hardware at v ≈ 0).
+             Note: during STOP-triggered presence hold, this filter is
+             intentionally bypassed by the caller injecting pre-filtered
+             points — see StaticPresenceHold in main.py.
         """
+        # SNR gate
+        snr_valid = [p for p in points if p.snr >= self.min_snr]
+
+        # Velocity gate — the static_filter was stored but never applied here
+        # (the bug: only main.py's --min-velocity pre-pass was filtering).
+        # Now it gates here too, so the classifier always enforces it regardless
+        # of how main.py is called.
         valid = [
-            p for p in points
-            if p.snr >= self.min_snr
+            p for p in snr_valid
+            if abs(p.velocity) >= self.static_filter
         ]
 
         if not valid:

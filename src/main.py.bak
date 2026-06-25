@@ -1,0 +1,267 @@
+"""
+main.py — mmWave arm safety pipeline
+DNTD Dynamics — IWR6843AOP
+
+Wires together:
+  uart_reader.py  → MmwaveReader (background thread, queue of parsed Frame objects)
+  tlv_parser.py   → Frame/Point dataclasses (already parsed inside MmwaveReader)
+  zone_logic.py   → CLEAR / CAUTION / STOP classification
+  ZoneOutputs     → serial + GPIO + MQTT (configure below)
+
+Usage:
+  python3 main.py                        # default config
+  python3 main.py --serial /dev/ttyACM0  # output to Arduino/Pi
+  python3 main.py --mqtt 192.168.254.117 # output to Sterling broker
+  python3 main.py --gpio                 # output on GPIO pins (RPi only)
+  python3 main.py --dry-run              # print zones, no outputs
+  python3 main.py --min-range 0.15       # ignore detections closer than this (mount/self clutter)
+  python3 main.py --clear-hysteresis 20  # frames of no-detection before confirming CLEAR
+  python3 main.py --occupancy-hold 1.5   # seconds to hold last-seen zone after detection drops
+
+Run 'python3 main.py --help' for full options.
+"""
+
+import argparse
+import logging
+import signal
+import sys
+import threading
+import time
+from dataclasses import replace
+
+# ---------------------------------------------------------------------------
+# Configure logging before imports so all modules use the same format
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("main")
+
+# ---------------------------------------------------------------------------
+# Local imports — all in ~/mmwave/src/
+# ---------------------------------------------------------------------------
+try:
+    from uart_reader import MmwaveReader
+    from zone_logic import ZoneClassifier, ZoneOutputs, DetectedPoint
+except ImportError as e:
+    logger.error(f"Import failed: {e}")
+    logger.error("Make sure uart_reader.py, tlv_parser.py, zone_logic.py are in the same directory.")
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Config — sensor ports (match your Jetson enumeration)
+# ---------------------------------------------------------------------------
+CLI_PORT    = "/dev/ttyUSB0"
+CLI_BAUD    = 115200
+DATA_PORT   = "/dev/ttyUSB1"
+DATA_BAUD   = 921600
+CONFIG_FILE = "/home/nic/mmwave/configs/profile_AOP.cfg"
+
+# Zone severity for occupancy-hold comparisons
+ZONE_SEVERITY = {"CLEAR": 0, "CAUTION": 1, "STOP": 2}
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+def run(args):
+    logger.info("DNTD Dynamics -- mmWave arm safety pipeline starting")
+    logger.info(f"CLI:  {CLI_PORT} @ {CLI_BAUD}")
+    logger.info(f"Data: {DATA_PORT} @ {DATA_BAUD}")
+    logger.info(f"Min range filter: {args.min_range}m (mount/self-reflection exclusion)")
+    logger.info(f"Hysteresis: upgrade={args.hysteresis} frames, downgrade={args.clear_hysteresis} frames")
+    logger.info(f"Occupancy hold: {args.occupancy_hold}s")
+
+    # --- Zone classifier ---
+    classifier = ZoneClassifier(
+        stop_range       = args.stop_range,
+        caution_range    = args.caution_range,
+        fast_approach    = args.fast_approach,
+        hysteresis       = args.hysteresis,
+        clear_hysteresis = args.clear_hysteresis,
+    )
+
+    # --- Output layer ---
+    outputs = ZoneOutputs(
+        serial_port  = args.serial if not args.dry_run else None,
+        use_gpio     = args.gpio   if not args.dry_run else False,
+        mqtt_broker  = args.mqtt   if not args.dry_run else None,
+    )
+
+    if args.dry_run:
+        logger.info("DRY RUN -- zone states will print only, no outputs active")
+
+    # --- mmWave reader ---
+    reader = MmwaveReader(
+        cli_port  = CLI_PORT,
+        cli_baud  = CLI_BAUD,
+        data_port = DATA_PORT,
+        data_baud = DATA_BAUD,
+    )
+
+    logger.info(f"Sending sensor config: {CONFIG_FILE}")
+    errors = reader.send_config(CONFIG_FILE)
+    if errors:
+        for line, resp in errors:
+            logger.error(f"Config error on '{line}': {resp}")
+        logger.error("Sensor config failed -- aborting")
+        sys.exit(1)
+
+    logger.info("Config sent. Starting reader thread...")
+    reader.start()
+
+    # --- Graceful shutdown ---
+    stop_event = threading.Event()
+
+    def _shutdown(sig, frame):
+        logger.info("Shutdown signal received -- stopping pipeline")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT,  _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # --- Main loop ---
+    frame_count   = 0
+    last_log_t    = time.time()
+    last_zone     = None
+    min_range_sq  = args.min_range ** 2
+
+    # Occupancy hold state
+    last_seen_zone = None
+    last_seen_time = 0.0
+
+    try:
+        while not stop_event.is_set():
+            frame = reader.get_frame(timeout=1.0)
+            if frame is None:
+                continue
+
+            # Convert tlv_parser.Point -> zone_logic.DetectedPoint,
+            # dropping points inside the mount/self-reflection radius
+            points = []
+            for p in frame.points:
+                if (p.x*p.x + p.y*p.y + p.z*p.z) < min_range_sq:
+                    continue
+                points.append(DetectedPoint(x=p.x, y=p.y, z=p.z, velocity=p.velocity, snr=p.snr))
+
+            # Classify
+            state = classifier.update_frame(points)
+
+            # --- Occupancy hold ---
+            # If we had a detection recently and this frame is empty,
+            # don't let the zone relax below the last-seen severity until
+            # occupancy_hold seconds have passed with no detection.
+            now = time.time()
+            if state.point_count > 0:
+                last_seen_zone = state.zone
+                last_seen_time = now
+            elif (
+                last_seen_zone is not None
+                and (now - last_seen_time) < args.occupancy_hold
+                and ZONE_SEVERITY[last_seen_zone] > ZONE_SEVERITY[state.zone]
+            ):
+                state = replace(
+                    state,
+                    zone=last_seen_zone,
+                    reason=f"Holding {last_seen_zone} -- last detection {now - last_seen_time:.1f}s ago",
+                )
+
+            # Publish outputs (only on zone change -- ZoneOutputs handles dedup)
+            outputs.publish(state)
+
+            # Console log — always print if verbose, otherwise only on zone change
+            if args.verbose or state.zone != last_zone:
+                logger.info(f"ZONE -> {state.zone}  |  {state.reason}")
+                last_zone = state.zone
+                
+            frame_count += 1
+
+            # Periodic stats every 10s
+            now2 = time.time()
+            if now2 - last_log_t >= 10.0:
+                fps = frame_count / (now2 - last_log_t) if (now2 - last_log_t) > 0 else 0
+                logger.info(
+                    f"Pipeline stats: {frame_count} frames | "
+                    f"{fps:.1f} fps | zone={state.zone} | "
+                    f"pts={state.point_count} | q={reader.frame_queue.qsize()}"
+                )
+                frame_count = 0
+                last_log_t  = now2
+
+    finally:
+        logger.info("Stopping reader...")
+        reader.stop()
+        outputs.cleanup()
+        logger.info("Pipeline stopped cleanly.")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="mmWave arm safety pipeline -- DNTD Dynamics"
+    )
+    p.add_argument(
+        "--serial", metavar="PORT", default=None,
+        help="Serial port for zone output (e.g. /dev/ttyACM0 or COM3)"
+    )
+    p.add_argument(
+        "--gpio", action="store_true",
+        help="Output zone state on GPIO pins (Raspberry Pi BCM 17/27/22)"
+    )
+    p.add_argument(
+        "--mqtt", metavar="BROKER", default=None,
+        help="MQTT broker IP for zone output (e.g. 192.168.254.117)"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="Print zone states only, activate no outputs"
+    )
+    p.add_argument(
+        "--stop-range", type=float, default=0.5,
+        metavar="M",
+        help="Hard stop radius in meters (default: 0.5)"
+    )
+    p.add_argument(
+        "--caution-range", type=float, default=1.2,
+        metavar="M",
+        help="Caution zone radius in meters (default: 1.2)"
+    )
+    p.add_argument(
+        "--fast-approach", type=float, default=-0.8,
+        metavar="M/S",
+        help="Approach velocity that triggers STOP from caution zone (default: -0.8)"
+    )
+    p.add_argument(
+        "--min-range", type=float, default=0.1,
+        metavar="M",
+        help="Ignore detections closer than this (mount/self-reflection exclusion, default: 0.1)"
+    )
+    p.add_argument(
+        "--hysteresis", type=int, default=2,
+        metavar="N",
+        help="Consecutive frames before confirming a zone upgrade (default: 2)"
+    )
+    p.add_argument(
+        "--clear-hysteresis", type=int, default=10,
+        metavar="N",
+        help="Consecutive no-detection frames before confirming CLEAR (default: 10)"
+    )
+    p.add_argument(
+        "--occupancy-hold", type=float, default=1.5,
+        metavar="SEC",
+        help="Seconds to hold last-seen zone after detections stop (default: 1.5)"
+    )
+    p.add_argument(
+        "--verbose", action="store_true",
+        help="Print zone state every frame, not just on change"
+    )
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    run(parse_args())
