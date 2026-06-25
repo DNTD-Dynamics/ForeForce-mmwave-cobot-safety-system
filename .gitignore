@@ -1,2 +1,4 @@
 configs/*.local.yaml
 logs/
+configs/profile_AOP.cfg
+*.bak
