@@ -3,3 +3,6 @@ logs/
 configs/profile_AOP.cfg
 *.bak
 __pycache__/
+*.pyc
+*.pyo
+*.DS_Store
