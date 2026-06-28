@@ -43,7 +43,7 @@ class DntdMmwaveDriverNode(Node):
         self.declare_parameter('data_port',       '/dev/ttyUSB1')
         self.declare_parameter('data_baud',       921600)
         self.declare_parameter('config_file',
-            os.path.expanduser('~/mmwave/configs/profile_AOP.cfg'))
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'configs', 'profile_AOP.cfg'))
         self.declare_parameter('sensor_frame_id', 'mmwave_sensor')
         self.declare_parameter('publish_hz',      10.0)
         self.declare_parameter('send_config',     True)

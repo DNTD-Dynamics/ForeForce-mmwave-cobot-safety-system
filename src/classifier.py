@@ -124,7 +124,7 @@ class MicroDopplerClassifier:
     def __init__(
         self,
         thresholds:   Optional[dict] = None,
-        log_path:     str = os.path.expanduser("~/mmwave/logs/classifier_training.csv"),
+        log_path: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "classifier_training.csv"),
         enable_logging: bool = True,
     ):
         # Merge provided thresholds over defaults

@@ -91,7 +91,7 @@ class BackgroundModel:
     DEFAULT_REFRESH_RATE    = 0.020  # per-frame counter increment when seen
     DEFAULT_BACKGROUND_THR  = 0.50   # voxel "background_score" threshold post-learning
     DEFAULT_MAX_RANGE       = 8.92   # m — match radar max range from .cfg
-    DEFAULT_MAP_PATH        = os.path.expanduser("~/mmwave/configs/background_map.npz")
+    DEFAULT_MAP_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs", "background_map.npz")
 
     def __init__(
         self,

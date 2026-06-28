@@ -94,7 +94,8 @@ CLI_PORT    = "/dev/ttyUSB0"
 CLI_BAUD    = 115200
 DATA_PORT   = "/dev/ttyUSB1"
 DATA_BAUD   = 921600
-CONFIG_FILE = "/home/nic/mmwave/configs/profile_AOP.cfg"
+_REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_FILE = os.path.join(_REPO_ROOT, "configs", "profile_AOP.cfg")
 
 # Zone severity for occupancy-hold comparison
 ZONE_SEVERITY = {"CLEAR": 0, "CAUTION": 1, "STOP": 2}
@@ -401,7 +402,7 @@ def parse_args():
     bg.add_argument("--bg-relearn",    action="store_true",
                     help="Force fresh learning cycle (clear saved map and relearn)")
     bg.add_argument("--bg-map-path",
-                    default="~/mmwave/configs/background_map.npz",
+                    default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs", "background_map.npz"),
                     metavar="PATH",
                     help="Path for saved background map")
 

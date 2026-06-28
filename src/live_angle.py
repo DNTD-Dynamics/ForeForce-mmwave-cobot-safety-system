@@ -1,8 +1,9 @@
+import os
 import time, math
 from uart_reader import MmwaveReader
 
 reader = MmwaveReader()
-errors = reader.send_config('/home/nic/mmwave/configs/profile_AOP.cfg')
+errors = reader.send_config(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'configs', 'profile_AOP.cfg'))
 if errors:
     for line, resp in errors: print(f"ERROR: {line}: {resp}")
     raise SystemExit

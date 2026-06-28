@@ -31,11 +31,13 @@ def sensor_ports(index: int) -> tuple[str, str]:
 
 def sensor_config_file(index: int) -> str:
     """Returns config file path for sensor at given index."""
+    _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) 
     configs = [
-        os.path.expanduser("~/mmwave/configs/profile_AOP.cfg"),
-        os.path.expanduser("~/mmwave/configs/profile_AOP_sensor1.cfg"),
-        os.path.expanduser("~/mmwave/configs/profile_AOP_sensor2.cfg"),
+        os.path.join(_REPO_ROOT, 'configs', 'profile_AOP.cfg'),
+        os.path.join(_REPO_ROOT, 'configs', 'profile_AOP_sensor1.cfg'),
+        os.path.join(_REPO_ROOT, 'configs', 'profile_AOP_sensor2.cfg'),
     ]
+    
     return configs[min(index, len(configs) - 1)]
 
 
@@ -52,7 +54,7 @@ def generate_launch_description():
     )
     safety_config_arg = DeclareLaunchArgument(
         'safety_config',
-        default_value=os.path.expanduser('~/mmwave/configs/dntd_mmwave_config.yaml'),
+        default_value=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'configs', 'dntd_mmwave_config.yaml'),
         description='Path to safety node YAML config',
     )
 
