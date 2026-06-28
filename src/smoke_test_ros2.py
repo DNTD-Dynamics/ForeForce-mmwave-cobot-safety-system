@@ -50,6 +50,7 @@ import os
 try:
     import rclpy
     from rclpy.node import Node
+    from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy  # add this line
     from std_msgs.msg import String, Bool, Header
     from sensor_msgs.msg import PointCloud2
     HAS_ROS = True
@@ -97,15 +98,34 @@ class SmokeTestNode(Node):
         self._received  = {t: [] for t in self.TOPICS}
         self._lock      = threading.Lock()
 
+        # compensated_points is published BEST_EFFORT by the safety node
+        # (it is sensor data, not control state). A default RELIABLE
+        # subscription will not connect to it. All other safety outputs
+        # are RELIABLE, so only this topic needs the override.
+        best_effort_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=5,
+        )
+
         for topic, msg_type in self.TOPICS.items():
+            qos = best_effort_qos if topic == "/dntd/compensated_points" else 10
             self.create_subscription(
                 msg_type, topic,
                 lambda msg, t=topic: self._cb(t, msg),
-                10
+                qos
             )
 
+        # safety_resume: the safety node subscribes with TRANSIENT_LOCAL so a
+        # resume sent before it is ready still latches. Match it here, else
+        # DDS refuses the link (DURABILITY mismatch).
+        resume_qos = QoSProfile(
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            depth=1,
+        )
         self._resume_pub = self.create_publisher(
-            Bool, "/dntd/safety_resume", 10)
+            Bool, "/dntd/safety_resume", resume_qos)
 
         self.get_logger().info("Smoke test node started — listening on all topics")
 
@@ -173,9 +193,14 @@ def check_driver_node(node, wait=10.0):
     raw_received = []
     from sensor_msgs.msg import PointCloud2 as PC2
 
+    sensor_qos = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    durability=DurabilityPolicy.VOLATILE,
+    depth=5,
+    )
     sub = node.create_subscription(
         PC2, "/dntd/mmwave/raw_points",
-        lambda msg: raw_received.append(msg), 10
+        lambda msg: raw_received.append(msg), sensor_qos
     )
 
     deadline = time.monotonic() + wait

@@ -70,8 +70,8 @@ class DntdMmwaveDriverNode(Node):
         )
 
         # Publishers
-        self._pub_cloud = self.create_publisher(PointCloud2, 'mmwave/raw_points', sensor_qos)
-        self._pub_diag  = self.create_publisher(DiagnosticStatus, 'mmwave/diagnostics', 10)
+        self._pub_cloud = self.create_publisher(PointCloud2, '/dntd/mmwave/raw_points', sensor_qos)
+        self._pub_diag  = self.create_publisher(DiagnosticStatus, '/dntd/mmwave/diagnostics', 10)
 
         # MmwaveReader
         self._reader = MmwaveReader(

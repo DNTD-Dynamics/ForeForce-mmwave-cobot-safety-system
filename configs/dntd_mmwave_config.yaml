@@ -225,7 +225,8 @@ dntd_mmwave_safety:
     # -------------------------------------------------------------------------
     swept_volume_enabled:         true
     swept_volume_mount_joint_idx: 3      # forearm link (joint 4 on 6-DOF arm)
-    swept_volume_max_reach_m:     0.0    # 0 = auto-compute from chain geometry
+    #swept_volume_max_reach_m:     0.0    # 0 = auto-compute from chain geometry
+    swept_volume_max_reach_m:     2.0    # manual — covers full test range, this is for testing only, comment out and remove comment for above for auto-compute on multi-axis arm
     swept_volume_self_radius_m:   0.15   # arm body exclusion radius
     swept_volume_reach_margin_m:  0.20   # safety margin beyond nominal reach
 
