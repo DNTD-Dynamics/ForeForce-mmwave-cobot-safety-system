@@ -92,7 +92,7 @@ def check_config(cli_port, config_path):
 
     if not os.path.exists(config_path):
         print(FAIL(f"Config file not found: {config_path}"))
-        print(INFO("Expected location: ~/mmwave/configs/profile_AOP.cfg"))
+        print(INFO("Expected location: configs/profile_AOP.cfg (in repo root)"))
         print(INFO("Kit owners: copy profile_AOP.cfg from your private repo access"))
         return False, None
 
@@ -105,7 +105,7 @@ def check_config(cli_port, config_path):
     try:
         from uart_reader import MmwaveReader
     except ImportError:
-        print(FAIL("uart_reader.py not found — run from repo root: cd ~/mmwave"))
+        print(FAIL("uart_reader.py not found — run from repo root: cd RadarGuard-mmwave-cobot-safety-system"))
         return False, None
 
     reader = MmwaveReader(cli_port=cli_port)
@@ -335,8 +335,7 @@ def main():
     parser.add_argument("--data",   default="/dev/ttyUSB1",
                         help="Data port (default: /dev/ttyUSB1)")
     parser.add_argument("--config",
-                        default=os.path.expanduser(
-                            "~/mmwave/configs/profile_AOP.cfg"),
+                        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs", "profile_AOP.cfg"),
                         help="Chirp config file path")
     parser.add_argument("--no-live", action="store_true",
                         help="Skip the live wave detection test")
