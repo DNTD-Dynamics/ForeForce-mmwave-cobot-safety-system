@@ -1,0 +1,10 @@
+# ---- append these to .gitignore ----
+
+# Environment-specific learned background map — generated per-install, never ship
+*.npz
+
+# Per-site config overrides (optional layered params files)
+configs/*.local.yaml
+
+# Classifier training data — generated at runtime from the user's environment
+logs/
