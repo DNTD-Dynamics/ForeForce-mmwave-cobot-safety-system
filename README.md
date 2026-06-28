@@ -16,7 +16,7 @@ Unlike camera-based approaches, mmWave radar:
 - Runs at 10 Hz with sub-100 ms zone transition latency
 - Mounts directly on the arm — the sensor moves with the robot
 
-Two pipelines ship in this repo. The **standalone pipeline** (`main.py`) runs today on a single sensor with no ROS 2 dependency and has been hardware-validated with a live mounted sweep. The **ROS 2 safety node** (`dntd_mmwave_safety_node.py`) is the full architecture — ego-motion compensation, background learning, micro-doppler classification, and swept-volume workspace clipping — and is actively being brought up toward hardware validation. Both pipelines share the same underlying driver, parser, and zone logic.
+Two pipelines ship in this repo. The **standalone pipeline** (`main.py`) runs today on a single sensor with no ROS 2 dependency and has been hardware-validated with a live mounted sweep. The **ROS 2 safety node** (`dntd_mmwave_safety_node.py`) is the full architecture — ego-motion compensation, background learning, micro-doppler classification, and swept-volume workspace clipping. The complete ROS 2 graph is wired and passes an end-to-end smoke test from a clean clone (`smoke_test_ros2.py`): live driver, safety node, background learning, and CLEAR/CAUTION/STOP zone transitions all verified. The remaining step is hardware validation of ego-motion compensation against real `/joint_states` from a moving arm. Both pipelines share the same underlying driver, parser, and zone logic.
 
 ---
 
@@ -157,7 +157,7 @@ The `--min-velocity` filter that eliminates false triggers from walls and mount 
 
 ## ROS 2 safety node — full pipeline (in development)
 
-`dntd_mmwave_safety_node.py` is the production architecture. All five major capabilities are implemented and wired; hardware validation of the integrated pipeline is in progress.
+`dntd_mmwave_safety_node.py` is the production architecture. All five major capabilities are implemented and wired, and the full graph passes an end-to-end smoke test from a clean clone (see [validation](#ros-2-setup) below). The integrated pipeline has been validated in simulation with `fake_joint_states.py`; the remaining step is hardware validation of ego-motion compensation against real `/joint_states` from a moving arm.
 
 ### Architecture
 
@@ -243,13 +243,22 @@ cd src && python3 dntd_mmwave_driver_node.py
 
 # Terminal 2 — safety node
 cd src && python3 dntd_mmwave_safety_node.py \
-  --ros-args -r /dntd/mmwave/raw_points:=/mmwave/raw_points
+  --ros-args --params-file ../configs/dntd_mmwave_config.yaml
 
 # Terminal 3 — watch zone output
 ros2 topic echo /dntd/safety_zone
 ```
 
 Stand clear during background learning (default 15 s, status on `/dntd/safety_fault`). After learning completes, walk toward the sensor — CLEAR → CAUTION → STOP.
+
+**Verify the full graph before relying on it.** Two scripts validate bring-up from a clean clone:
+
+```bash
+python3 src/validate_hardware.py     # 5 checks — sensor enumeration, config, stream, detection
+python3 src/smoke_test_ros2.py       # 10 checks — full ROS 2 graph, zone transitions
+```
+
+`validate_hardware.py` confirms the sensor itself is good before any ROS 2 layer is involved — run it first if the smoke test reports no point cloud.
 
 ### Adapting to your arm
 
@@ -282,7 +291,7 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 
 | Sensor | Status | Notes |
 |--------|--------|-------|
-| IWR6843AOPEVM | ✅ Validated (standalone) · 🔲 ROS 2 node in progress | Primary development platform |
+| IWR6843AOPEVM | ✅ Validated (standalone) · ✅ ROS 2 graph (sim) · 🔲 ROS 2 hardware (real joints) | Primary development platform |
 | IWRL6432AOPEVM | 🔲 In development | Battery-powered / mobile robot variant |
 
 | Compute | Status |
@@ -321,7 +330,8 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 - [x] Heartbeat watchdog topic
 - [x] World-frame compensated point cloud output (RViz-ready)
 - [x] Arm configuration GUI — measure joints and generate YAML without editing code
-- [ ] Hardware validation — full integrated pipeline on live hardware with real `/joint_states`
+- [x] ROS 2 graph validated end-to-end from clean clone — smoke test (10 checks) passing with simulated `/joint_states`
+- [ ] Hardware validation — ego-motion compensation against real `/joint_states` from a moving arm
 - [ ] Kinematic chain from real arm URDF (current default is UR5 placeholder geometry)
 - [ ] Micro-doppler classifier — ML weights replacing rule-based scoring (Phase 6b)
 - [ ] 3-sensor 120° forearm array fusion — 3× IWR6843AOP at 120° spacing
