@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.DS_Store
+
+# Environment-specific learned background map — never ship
+*.npz
