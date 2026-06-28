@@ -8,6 +8,9 @@
 #   sensor_0.yaml → /dev/ttyUSB0 + /dev/ttyUSB1
 #   sensor_1.yaml → /dev/ttyUSB2 + /dev/ttyUSB3
 #   sensor_2.yaml → /dev/ttyUSB4 + /dev/ttyUSB5
+#
+#   NOTE: an ESP32 arm controller (CP2102) also enumerates as a ttyUSB*.
+#   Always verify with udevadm before assigning ports — order can shift.
 
 dntd_mmwave_driver:
   ros__parameters:
@@ -31,8 +34,13 @@ dntd_mmwave_driver:
     # SENSOR CONFIG FILE
     # The validated profile_AOP.cfg is correct for IWR6843AOP.
     # Do not use xwr68xx_mmw_demo.bin config — ISK firmware only.
+    #
+    # Leave this commented out for normal use: the driver node resolves the
+    # profile relative to its own location (<repo>/configs/profile_AOP.cfg),
+    # so it works from a clean clone regardless of working directory.
+    # Uncomment and set an absolute path only to point at a custom profile.
     # -------------------------------------------------------------------------
-    config_file: "~/mmwave/configs/profile_AOP.cfg"
+    # config_file: "/absolute/path/to/your/profile_AOP.cfg"
 
     # Send chirp config to sensor on startup (true = normal operation)
     # Set false only if sensor is already streaming (debug sessions)
