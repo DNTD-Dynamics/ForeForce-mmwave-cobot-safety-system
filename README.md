@@ -8,7 +8,7 @@ Built by [DNTD Dynamics](https://dntddynamics.com) · Licensed under [BSL 1.1](#
 
 ## What is this?
 
-ForeForce is an open-source safety system that uses mmWave radar to detect people in a robot's workspace and output **CLEAR / CAUTION / STOP** zone commands in real time.
+ForeForce is a source-available safety system that uses mmWave radar to detect people in a robot's workspace and output **CLEAR / CAUTION / STOP** zone commands in real time.
 
 Unlike camera-based approaches, mmWave radar:
 - Works in complete darkness, dust, smoke, and welding flash
@@ -351,7 +351,7 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 
 ---
 
-## Open source + the kit
+## Source-available + the kit
 
 ForeForce's full pipeline is source-available under BSL 1.1 — read it, run it, learn from it, build non-commercial projects with it. That's deliberate: you should be able to see exactly how a safety system behaves before you trust it near people.
 
