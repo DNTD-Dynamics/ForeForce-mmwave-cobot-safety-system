@@ -1,4 +1,4 @@
-# Foreforce — mmWave Cobot Safety System
+# ForeForce — mmWave Cobot Safety System
 
 **Real-time human presence detection for robot arms and mobile robots, powered by mmWave radar.**
 
@@ -8,7 +8,7 @@ Built by [DNTD Dynamics](https://dntddynamics.com) · Licensed under [BSL 1.1](#
 
 ## What is this?
 
-Foreforce is an open-source safety system that uses mmWave radar to detect people in a robot's workspace and output **CLEAR / CAUTION / STOP** zone commands in real time.
+ForeForce is an open-source safety system that uses mmWave radar to detect people in a robot's workspace and output **CLEAR / CAUTION / STOP** zone commands in real time.
 
 Unlike camera-based approaches, mmWave radar:
 - Works in complete darkness, dust, smoke, and welding flash
@@ -89,8 +89,8 @@ pip3 install pyserial numpy
 **3. Clone and run**
 
 ```bash
-git clone https://github.com/DNTD-Dynamics/Foreforce-mmwave-cobot-safety-system.git
-cd Foreforce-mmwave-cobot-safety-system/src
+git clone https://github.com/DNTD-Dynamics/ForeForce-mmwave-cobot-safety-system.git
+cd ForeForce-mmwave-cobot-safety-system/src
 ```
 
 Dry run (no hardware outputs — confirm zone transitions in terminal):
@@ -141,7 +141,7 @@ python3 main.py --dry-run --bg-learn --bg-learn-time 15
 
 ### Static person detection
 
-The `--min-velocity` filter that eliminates false triggers from walls and mount hardware also drops a person who has stopped moving. Foreforce addresses this with two complementary layers:
+The `--min-velocity` filter that eliminates false triggers from walls and mount hardware also drops a person who has stopped moving. ForeForce addresses this with two complementary layers:
 
 **Micro-Doppler presence hold** (`presence_hold.py`, always active): Once a STOP is confirmed, the pipeline latches. A stationary person generates low-amplitude involuntary movement — weight shifts, postural micro-corrections — producing Doppler returns in the 0.02–0.25 m/s range that are detectable even when the person's centroid velocity is near zero. The hold releases only after these sway signals are absent for `--hold-timeout` seconds, followed by `--release-grace` seconds of grace.
 
@@ -193,7 +193,7 @@ Joint geometry is supplied in `configs/dntd_mmwave_config.yaml`, or via the arm 
 
 ### Background learning
 
-On startup (configurable duration, default 15 s), Foreforce learns the static environment — walls, fixtures, mount hardware. After learning, only novel objects enter the classifier. A person who enters the workspace and stops moving remains detected; their presence is held in the background model's voxel grid rather than disappearing when their velocity drops to zero. The learned map is saved to disk and reloaded on subsequent boots — the learning phase runs once per sensor position.
+On startup (configurable duration, default 15 s), ForeForce learns the static environment — walls, fixtures, mount hardware. After learning, only novel objects enter the classifier. A person who enters the workspace and stops moving remains detected; their presence is held in the background model's voxel grid rather than disappearing when their velocity drops to zero. The learned map is saved to disk and reloaded on subsequent boots — the learning phase runs once per sensor position.
 
 ### Micro-doppler classifier
 
@@ -216,7 +216,7 @@ Given the current arm configuration and kinematic chain, computes the reachable 
 
 ### Fault handling
 
-Foreforce fails safe. If `/joint_states` stops publishing (arm controller crash, E-stop, cable fault), the node immediately publishes `STOP` and raises a fault on `/dntd/safety_fault`. Recovery requires an explicit resume:
+ForeForce fails safe. If `/joint_states` stops publishing (arm controller crash, E-stop, cable fault), the node immediately publishes `STOP` and raises a fault on `/dntd/safety_fault`. Recovery requires an explicit resume:
 
 ```bash
 ros2 topic pub --once /dntd/safety_resume std_msgs/Bool "data: true"
@@ -347,13 +347,13 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 
 ## Safety notice
 
-**Foreforce is a perception and awareness layer, not a certified functional safety system.** It has not been evaluated to ISO 13849, IEC 62061, or any other functional safety standard. Do not use as the sole or primary means of protecting people from robot motion in applications requiring certified safety performance. Use in combination with certified safety hardware and in compliance with applicable regulations for your installation.
+**ForeForce is a perception and awareness layer, not a certified functional safety system.** It has not been evaluated to ISO 13849, IEC 62061, or any other functional safety standard. Do not use as the sole or primary means of protecting people from robot motion in applications requiring certified safety performance. Use in combination with certified safety hardware and in compliance with applicable regulations for your installation.
 
 ---
 
 ## Open source + the kit
 
-Foreforce's full pipeline is source-available under BSL 1.1 — read it, run it, learn from it, build non-commercial projects with it. That's deliberate: you should be able to see exactly how a safety system behaves before you trust it near people.
+ForeForce's full pipeline is source-available under BSL 1.1 — read it, run it, learn from it, build non-commercial projects with it. That's deliberate: you should be able to see exactly how a safety system behaves before you trust it near people.
 
 The **kit** is what makes it deployable. It includes the assembled and tested hardware — no sourcing the EVM, building the mount, or wiring it yourself — a commercial license to deploy the code, private-repo access for kit owners, and direct support from the person who built it. It also ships with the production chirp profile, which enables extended-velocity disambiguation: the validated firmware setting that holds tracking on a person down to ~0.35 m at close range, where the conservative example profile in this repo loses them near 0.5 m. The open code shows you the *how*; the kit gives you a validated, deployable system and the license to run it.
 
@@ -363,7 +363,7 @@ Commercial use of the code requires a license (see below). The kit includes one.
 
 ## Commercial use
 
-Foreforce is free for research, education, and non-commercial projects under the [Business Source License 1.1](LICENSE).
+ForeForce is free for research, education, and non-commercial projects under the [Business Source License 1.1](LICENSE).
 
 Commercial use requires a license from DNTD Dynamics.
 Contact: **info@dntddynamics.com**
@@ -376,7 +376,7 @@ Commercial use includes any product, service, or internal tooling that generates
 
 Issues, pull requests, and hardware compatibility reports are welcome.
 
-If you've validated Foreforce on a new arm or compute platform, open a PR to add it to the supported hardware table. If you hit a blocker, open an issue — setup has sharp edges and your report helps the next person.
+If you've validated ForeForce on a new arm or compute platform, open a PR to add it to the supported hardware table. If you hit a blocker, open an issue — setup has sharp edges and your report helps the next person.
 
 A Contributor License Agreement (CLA) is required before pull requests can be merged. Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -384,7 +384,7 @@ A Contributor License Agreement (CLA) is required before pull requests can be me
 
 ## About
 
-Foreforce is developed by [DNTD Dynamics](https://dntddynamics.com), a hardware research company based in Snohomish, Washington.
+ForeForce is developed by [DNTD Dynamics](https://dntddynamics.com), a hardware research company based in Snohomish, Washington.
 
 Built because the gap between "mmWave chip exists" and "working safety system a developer can deploy and understand in an afternoon" was too wide and too important to leave open.
 

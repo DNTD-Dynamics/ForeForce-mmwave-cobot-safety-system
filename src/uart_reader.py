@@ -1,4 +1,4 @@
-# uart_reader.py -- DNTD Dynamics Foreforce
+# uart_reader.py -- DNTD Dynamics ForeForce
 import serial
 import threading
 import queue

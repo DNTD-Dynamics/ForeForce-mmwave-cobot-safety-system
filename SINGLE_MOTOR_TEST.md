@@ -4,7 +4,7 @@ This guide walks through two test stages:
 
 1. **Single Motor Jig Test** — validate firmware, driver, limit switch, and ROS 2 bridge with one motor before committing to the full wiring harness. A stick or flat piece of wood taped to the shaft serves as a sweep arm for live mmWave zone transition testing.
 
-2. **Full 6-Axis Arm Test** — wire all six motors, verify homing and joint state publishing, and validate the complete Foreforce pipeline end-to-end with real arm geometry.
+2. **Full 6-Axis Arm Test** — wire all six motors, verify homing and joint state publishing, and validate the complete ForeForce pipeline end-to-end with real arm geometry.
 
 Complete Stage 1 before Stage 2. Each stage builds directly on the last.
 
@@ -65,7 +65,7 @@ DIP switches S4/S5/S6 set motor current. Match your motor's rated current. Start
 4. Select the correct COM port for your ESP32.
 5. Flash. Open Serial Monitor at **115200 baud**. You should see:
    ```
-   Foreforce Arm Controller ready.
+   ForeForce Arm Controller ready.
    MICROSTEP_DIVISOR=8  STEPS_PER_REV=1600
    Commands: HOME [n] | JOG <n> <steps> | SWEEP <n> <steps> <count> | STOP | STATUS | SPEED <n|ALL> <us>
    ```
@@ -194,7 +194,7 @@ Tape or clamp a flat stick, ruler, or scrap of wood to the motor shaft so it swe
 SWEEP 0 800 20
 ```
 
-This sweeps joint 0 ±800 steps (±180°) twenty times. While it is running, start the full Foreforce mmWave stack on the Jetson and walk into the swept arc. You should see:
+This sweeps joint 0 ±800 steps (±180°) twenty times. While it is running, start the full ForeForce mmWave stack on the Jetson and walk into the swept arc. You should see:
 
 ```
 CLEAR → CAUTION → STOP

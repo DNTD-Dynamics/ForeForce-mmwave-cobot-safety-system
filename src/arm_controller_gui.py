@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-arm_controller_gui.py — Foreforce Arm Controller GUI
+arm_controller_gui.py — ForeForce Arm Controller GUI
 Runs on Jetson desktop. Publishes commands to /arm_cmd (std_msgs/String).
 Requires arm_controller_node.py to be running first.
 
@@ -140,7 +140,7 @@ class ArmControllerGUI:
 
     def __init__(self, root: tk.Tk):
         self.root        = root
-        self.root.title("Foreforce — Arm Controller")
+        self.root.title("ForeForce — Arm Controller")
         self.root.configure(bg=C_BG)
         self.root.resizable(True, True)
         self.root.minsize(700, 640)

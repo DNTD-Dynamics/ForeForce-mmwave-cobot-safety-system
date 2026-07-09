@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 smoke_test_ros2.py
-DNTD Dynamics — Foreforce ROS2 Pipeline Smoke Test
+DNTD Dynamics — ForeForce ROS2 Pipeline Smoke Test
 
 Runs the full ROS2 safety pipeline with fake joint states and verifies
 every component initializes, connects, and produces expected outputs.
@@ -71,7 +71,7 @@ HEAD = lambda t:   _c("1;96", f"\n{'─'*54}\n  {t}\n{'─'*54}")
 def banner():
     print(_c("1;96", """
   ╔══════════════════════════════════════════════════════╗
-  ║   Foreforce — ROS2 Pipeline Smoke Test              ║
+  ║   ForeForce — ROS2 Pipeline Smoke Test              ║
   ║   DNTD Dynamics                                      ║
   ╚══════════════════════════════════════════════════════╝
 """))
@@ -444,7 +444,7 @@ def print_summary(results: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Foreforce ROS2 pipeline smoke test"
+        description="ForeForce ROS2 pipeline smoke test"
     )
     parser.add_argument("--skip-walk", action="store_true",
                         help="Skip the walk/zone transition test (step 10)")
