@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-arm_controller_gui.py — RadarGuard Arm Controller GUI
+arm_controller_gui.py — Foreforce Arm Controller GUI
 Runs on Jetson desktop. Publishes commands to /arm_cmd (std_msgs/String).
 Requires arm_controller_node.py to be running first.
 
@@ -140,7 +140,7 @@ class ArmControllerGUI:
 
     def __init__(self, root: tk.Tk):
         self.root        = root
-        self.root.title("RadarGuard — Arm Controller")
+        self.root.title("Foreforce — Arm Controller")
         self.root.configure(bg=C_BG)
         self.root.resizable(True, True)
         self.root.minsize(700, 640)
@@ -181,7 +181,7 @@ class ArmControllerGUI:
         title_frame.pack(fill="x", padx=12, pady=(10, 4))
 
         tk.Label(
-            title_frame, text="RADARGUARD", font=("Courier New", 16, "bold"),
+            title_frame, text="FOREFORCE", font=("Courier New", 16, "bold"),
             fg=C_ACCENT, bg=C_BG
         ).pack(side="left")
         tk.Label(

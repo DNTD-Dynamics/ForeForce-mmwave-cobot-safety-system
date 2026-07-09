@@ -1,6 +1,6 @@
 """
 arm_config_gui.py
-DNTD Dynamics — RadarGuard Arm Configuration Tool
+DNTD Dynamics — Foreforce Arm Configuration Tool
 
 Lets you enter your arm's physical measurements and writes the correct
 joint_geometry, joint_names, zone distances, and sensor mount directly
@@ -210,7 +210,7 @@ class ArmConfigGUI:
         self.config_path = config_path
         self._joint_rows = []   # list of dicts of tk.Vars per joint
 
-        root.title("RadarGuard — Arm Configuration")
+        root.title("Foreforce — Arm Configuration")
         root.configure(bg=self.BG)
         root.minsize(700, 560)
         root.geometry("820x740")
@@ -251,7 +251,7 @@ class ArmConfigGUI:
         # Header
         hdr = tk.Frame(root, bg=self.BG)
         hdr.pack(fill="x", padx=24, pady=(18, 0))
-        tk.Label(hdr, text="RadarGuard", bg=self.BG, fg=self.ACCENT,
+        tk.Label(hdr, text="Foreforce", bg=self.BG, fg=self.ACCENT,
                  font=self.FONT_HEAD).pack(anchor="w")
         tk.Label(hdr, text="Arm Configuration  ·  writes joint geometry to dntd_mmwave_config.yaml",
                  bg=self.BG, fg=self.DIM, font=self.FONT_SMALL).pack(anchor="w", pady=(2,0))
@@ -638,7 +638,7 @@ class ArmConfigGUI:
 # ---------------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser(description="RadarGuard arm configuration GUI")
+    p = argparse.ArgumentParser(description="Foreforce arm configuration GUI")
     p.add_argument("--config", default=DEFAULT_CONFIG,
                    help="Path to dntd_mmwave_config.yaml")
     args = p.parse_args()

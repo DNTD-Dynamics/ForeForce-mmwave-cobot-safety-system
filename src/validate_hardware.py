@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 validate_hardware.py
-DNTD Dynamics — RadarGuard Out-of-Box Hardware Validation
+DNTD Dynamics — Foreforce Out-of-Box Hardware Validation
 
-Run this first when you receive your RadarGuard kit.
+Run this first when you receive your Foreforce kit.
 Verifies the sensor is connected, streaming, and producing valid detections
 before you attempt any arm mounting or pipeline configuration.
 
@@ -48,7 +48,7 @@ STEP  = lambda n, t: _c("1", f"\n[{n}] {t}")
 def banner():
     print(_c("1;96", """
   ╔══════════════════════════════════════════════════════╗
-  ║   RadarGuard — Out-of-Box Hardware Validation        ║
+  ║   Foreforce — Out-of-Box Hardware Validation        ║
   ║   DNTD Dynamics                                      ║
   ╚══════════════════════════════════════════════════════╝
 """))
@@ -105,7 +105,7 @@ def check_config(cli_port, config_path):
     try:
         from uart_reader import MmwaveReader
     except ImportError:
-        print(FAIL("uart_reader.py not found — run from repo root: cd RadarGuard-mmwave-cobot-safety-system"))
+        print(FAIL("uart_reader.py not found — run from repo root: cd Foreforce-mmwave-cobot-safety-system"))
         return False, None
 
     reader = MmwaveReader(cli_port=cli_port)
@@ -328,7 +328,7 @@ def print_summary(results: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="RadarGuard out-of-box hardware validation"
+        description="Foreforce out-of-box hardware validation"
     )
     parser.add_argument("--cli",    default="/dev/ttyUSB0",
                         help="CLI port (default: /dev/ttyUSB0)")

@@ -4,7 +4,7 @@ This guide walks through two test stages:
 
 1. **Single Motor Jig Test** — validate firmware, driver, limit switch, and ROS 2 bridge with one motor before committing to the full wiring harness. A stick or flat piece of wood taped to the shaft serves as a sweep arm for live mmWave zone transition testing.
 
-2. **Full 6-Axis Arm Test** — wire all six motors, verify homing and joint state publishing, and validate the complete RadarGuard pipeline end-to-end with real arm geometry.
+2. **Full 6-Axis Arm Test** — wire all six motors, verify homing and joint state publishing, and validate the complete Foreforce pipeline end-to-end with real arm geometry.
 
 Complete Stage 1 before Stage 2. Each stage builds directly on the last.
 
@@ -14,7 +14,7 @@ Complete Stage 1 before Stage 2. Each stage builds directly on the last.
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `radarguard_arm_controller.ino` | Flash to ESP32 | Stepper firmware — step/dir, homing, serial publisher |
+| `foreforce_arm_controller.ino` | Flash to ESP32 | Stepper firmware — step/dir, homing, serial publisher |
 | `arm_controller_node.py` | `~/mmwave/src/` on Jetson | ROS 2 bridge — serial → `/joint_states` |
 | `arm_controller_gui.py` | `~/mmwave/src/` on Jetson | GUI controller — optional but recommended |
 
@@ -56,7 +56,7 @@ DIP switches S4/S5/S6 set motor current. Match your motor's rated current. Start
 
 ## Firmware Setup (do this once, applies to both stages)
 
-1. Open `radarguard_arm_controller.ino` in Arduino IDE.
+1. Open `foreforce_arm_controller.ino` in Arduino IDE.
 2. Set the microstep divisor at the top of the file to match your TB6600 DIP switches:
    ```cpp
    #define MICROSTEP_DIVISOR  8   // change to 1, 2, 4, 16, or 32 to match TB6600
@@ -65,7 +65,7 @@ DIP switches S4/S5/S6 set motor current. Match your motor's rated current. Start
 4. Select the correct COM port for your ESP32.
 5. Flash. Open Serial Monitor at **115200 baud**. You should see:
    ```
-   RadarGuard Arm Controller ready.
+   Foreforce Arm Controller ready.
    MICROSTEP_DIVISOR=8  STEPS_PER_REV=1600
    Commands: HOME [n] | JOG <n> <steps> | SWEEP <n> <steps> <count> | STOP | STATUS | SPEED <n|ALL> <us>
    ```
@@ -194,7 +194,7 @@ Tape or clamp a flat stick, ruler, or scrap of wood to the motor shaft so it swe
 SWEEP 0 800 20
 ```
 
-This sweeps joint 0 ±800 steps (±180°) twenty times. While it is running, start the full RadarGuard mmWave stack on the Jetson and walk into the swept arc. You should see:
+This sweeps joint 0 ±800 steps (±180°) twenty times. While it is running, start the full Foreforce mmWave stack on the Jetson and walk into the swept arc. You should see:
 
 ```
 CLEAR → CAUTION → STOP

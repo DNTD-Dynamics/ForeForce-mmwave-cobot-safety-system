@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-arm_controller_node.py — RadarGuard ESP32 ↔ ROS 2 bridge
+arm_controller_node.py — Foreforce ESP32 ↔ ROS 2 bridge
 
 Reads joint angles from ESP32 serial stream and publishes to /joint_states.
 Forwards ROS 2 motion commands (JOG, SWEEP, HOME) back to ESP32 over serial.

@@ -1,4 +1,4 @@
-# uart_reader.py -- DNTD Dynamics RadarGuard
+# uart_reader.py -- DNTD Dynamics Foreforce
 import serial
 import threading
 import queue
