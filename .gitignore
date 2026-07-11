@@ -19,3 +19,4 @@ configs/*.local.yaml
 
 # Classifier training data — generated at runtime from the user's environment
 logs/
+*.bak 
