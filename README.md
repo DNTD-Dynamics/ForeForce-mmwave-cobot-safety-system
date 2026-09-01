@@ -24,12 +24,12 @@ Two pipelines ship in this repo. The **standalone pipeline** (`main.py`) runs to
 
 | Component | Part | Price |
 |-----------|------|-------|
-| mmWave sensor (fixed arm) | Texas Instruments IWR6843AOPEVM | $279 |
-| mmWave sensor (mobile / battery) | Texas Instruments IWRL6432AOPEVM | $199 |
+| mmWave sensor (fixed arm) | 60-64GHz mmWave EVM | - |
+| mmWave sensor (mobile / battery) | Low power mmWave PEVM | - |
 | Compute | Jetson Orin Nano/NX, Raspberry Pi 5, or any Ubuntu 22.04 ARM/x86 board | — |
 | Cable | USB-A to USB-B (standard) | — |
 
-The IWR6843AOP is the primary development platform and the current validated SKU. The IWRL6432AOP (mobile robot / battery-powered) is in development.
+The IWR6843AOP is the primary development platform and the current validated SKU.
 
 ---
 
@@ -102,7 +102,7 @@ python3 main.py --dry-run \
   --occupancy-hold 1.0
 ```
 
-Walk toward the sensor. You should see `CLEAR → CAUTION → STOP` as you enter the workspace. Stop and stand still — the system holds STOP via micro-Doppler sway detection. Step back and the hold releases after the grace period.
+Walk toward the sensor. You should see `CLEAR → CAUTION → STOP` as you enter the workspace. Step back and the hold releases after the grace period.
 
 With serial output to an arm controller:
 ```bash
