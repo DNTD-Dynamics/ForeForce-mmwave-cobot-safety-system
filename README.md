@@ -24,8 +24,8 @@ Two pipelines ship in this repo. The **standalone pipeline** (`main.py`) runs to
 
 | Component | Part | Price |
 |-----------|------|-------|
-| mmWave sensor (fixed arm) | 60-64GHz mmWave EVM | - |
-| mmWave sensor (mobile / battery) | Low power mmWave PEVM | - |
+| mmWave sensor (fixed arm) | IWR6843AOPEVM (60–64 GHz) | - |
+| mmWave sensor (mobile / battery) | IWRL6432AOPEVM (low-power) | - |
 | Compute | Jetson Orin Nano/NX, Raspberry Pi 5, or any Ubuntu 22.04 ARM/x86 board | — |
 | Cable | USB-A to USB-B (standard) | — |
 
@@ -171,7 +171,7 @@ IWR6843AOP (UART)
         ├── EgoMotionCompensator — subtracts sensor velocity via Jacobian
         ├── BackgroundModel — voxel-grid scene learning, masks static env
         ├── ClusterBuilder (DBSCAN) + MicroDopplerClassifier
-        │     — PERSON/UNKNOWN pass through (fail-safe)
+        │     — PERSON/UNKNOWN pass through (faults toward detection)
         │     — OBJECT suppressed
         └── SweptVolumeClipper — suppresses detections outside arm reach envelope
         ↓
@@ -197,7 +197,7 @@ On startup (configurable duration, default 15 s), ForeForce learns the static en
 
 ### Micro-doppler classifier
 
-Groups radar returns into spatial clusters (DBSCAN), then scores each cluster on velocity spread, height span, and point count. Clusters that score below the person threshold are suppressed before zone classification. Fail-safe: if the classifier suppresses all clusters but novel points are present, the original points pass through rather than reporting false CLEAR.
+Groups radar returns into spatial clusters (DBSCAN), then scores each cluster on velocity spread, height span, and point count. Clusters that score below the person threshold are suppressed before zone classification. Faults toward detection: if the classifier suppresses all clusters but novel points are present, the original points pass through rather than reporting false CLEAR.
 
 ### Swept-volume workspace clipper
 
@@ -216,7 +216,7 @@ Given the current arm configuration and kinematic chain, computes the reachable 
 
 ### Fault handling
 
-ForeForce fails safe. If `/joint_states` stops publishing (arm controller crash, E-stop, cable fault), the node immediately publishes `STOP` and raises a fault on `/dntd/safety_fault`. Recovery requires an explicit resume:
+ForeForce is designed to fault toward STOP. If `/joint_states` stops publishing (arm controller crash, E-stop, cable fault), the node immediately publishes `STOP` and raises a fault on `/dntd/safety_fault`. Recovery requires an explicit resume:
 
 ```bash
 ros2 topic pub --once /dntd/safety_resume std_msgs/Bool "data: true"
@@ -324,7 +324,7 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 - [x] Background scene learning — voxel grid, configurable duration, relearn-on-demand
 - [x] Background masking — novel-object detection, static environment suppressed
 - [x] Persistent background map — saved to disk after learning, reloaded on boot (no relearn required)
-- [x] Micro-doppler classifier — DBSCAN cluster builder, person vs. object scoring, fail-safe pass-through
+- [x] Micro-doppler classifier — DBSCAN cluster builder, person vs. object scoring, faults toward pass-through
 - [x] Swept-volume workspace clipper — suppresses detections outside arm reach envelope
 - [x] Fault handling — joint_states watchdog, explicit resume required
 - [x] Heartbeat watchdog topic
@@ -341,7 +341,7 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 
 - [ ] IWRL6432AOP pipeline — battery-powered and mobile robot variant
 - [ ] Custom PCB — DNTD-designed IWR6843AOP board, USB-C, compact form factor
-- [ ] FCC Part 15.255 self-declaration
+- [ ] FCC certification of the custom board (TCB certification path)
 
 ---
 
