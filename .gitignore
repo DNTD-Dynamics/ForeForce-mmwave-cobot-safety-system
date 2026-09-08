@@ -1,22 +1,9 @@
 configs/*.local.yaml
 logs/
-configs/profile_AOP.cfg
 *.bak
 __pycache__/
 *.pyc
 *.pyo
 *.DS_Store
-
-# Environment-specific learned background map — never ship
-*.npz
-# ---- append these to .gitignore ----
-
 # Environment-specific learned background map — generated per-install, never ship
 *.npz
-
-# Per-site config overrides (optional layered params files)
-configs/*.local.yaml
-
-# Classifier training data — generated at runtime from the user's environment
-logs/
-*.bak 
