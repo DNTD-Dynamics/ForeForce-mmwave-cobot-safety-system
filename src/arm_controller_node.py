@@ -4,13 +4,19 @@ arm_controller_node.py — ForeForce ESP32 ↔ ROS 2 bridge
 
 Reads joint angles from ESP32 serial stream and publishes to /joint_states.
 Forwards ROS 2 motion commands (JOG, SWEEP, HOME) back to ESP32 over serial.
+Also subscribes to the mmWave safety node's zone output and forwards it
+to the ESP32 as "ZONE CLEAR"/"ZONE CAUTION"/"ZONE STOP", matching the
+firmware's ZONE-prefixed command parser, so proximity detections drive
+the arm's speed-ramp firmware directly.
 
 Serial protocol (ESP32 → Jetson):
     J,<a0>,<a1>,<a2>,<a3>,<a4>,<a5>   angles in radians, 10Hz
 
 ROS 2 topics:
-    Publishes:  /joint_states  (sensor_msgs/JointState)
-    Subscribes: /arm_cmd       (std_msgs/String)  — forwarded raw to ESP32
+    Publishes:  /joint_states       (sensor_msgs/JointState)
+    Subscribes: /arm_cmd            (std_msgs/String)  — forwarded raw to ESP32
+    Subscribes: /dntd/safety_zone   (std_msgs/String)  — CLEAR/CAUTION/STOP,
+                                     from dntd_mmwave_safety_node.py
 
 /arm_cmd examples (publish from terminal):
     ros2 topic pub --once /arm_cmd std_msgs/String "data: 'JOG 0 400'"
@@ -23,6 +29,7 @@ ROS 2 topics:
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
@@ -68,6 +75,19 @@ class ArmControllerNode(Node):
         self._cmd_sub = self.create_subscription(
             String, "/arm_cmd", self._cmd_callback, 10
         )
+
+        # Subscriber — safety zone from dntd_mmwave_safety_node.py.
+        # That node publishes on RELIABLE + TRANSIENT_LOCAL QoS (depth 1) —
+        # must match here or messages are silently never delivered.
+        zone_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
+        self._zone_sub = self.create_subscription(
+            String, "/dntd/safety_zone", self._zone_callback, zone_qos
+        )
+        self._last_zone = None
 
         # Serial state
         self._ser    = None
@@ -168,14 +188,30 @@ class ArmControllerNode(Node):
         if not cmd:
             return
         self.get_logger().info(f"Forwarding command: {cmd}")
+        self._send_to_esp32(cmd, drop_log="command dropped")
+
+    # -----------------------------------------------------------------------
+    # /dntd/safety_zone subscriber — forward zone word to ESP32, prefixed
+    # "ZONE " to match the firmware's parser (cmd.startsWith("ZONE")).
+    # -----------------------------------------------------------------------
+
+    def _zone_callback(self, msg: String):
+        zone = msg.data.strip()
+        if not zone or zone == self._last_zone:
+            return
+        self._last_zone = zone
+        self.get_logger().info(f"Zone: {zone}")
+        self._send_to_esp32(f"ZONE {zone}", drop_log="zone command dropped")
+
+    def _send_to_esp32(self, cmd: str, drop_log: str):
         with self._lock:
             if self._ser and self._ser.is_open:
                 try:
                     self._ser.write((cmd + "\n").encode("utf-8"))
                 except serial.SerialException as e:
-                    self.get_logger().error(f"Failed to send command: {e}")
+                    self.get_logger().error(f"Failed to send '{cmd}': {e}")
             else:
-                self.get_logger().warn("ESP32 not connected — command dropped")
+                self.get_logger().warn(f"ESP32 not connected — {drop_log}")
 
     # -----------------------------------------------------------------------
     # Watchdog

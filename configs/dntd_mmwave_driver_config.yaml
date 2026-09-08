@@ -24,10 +24,13 @@ dntd_mmwave_driver:
     # Verify enumeration after plugging in: ls /dev/ttyUSB*
     # Use udev rules for stable names with multiple sensors (see README).
     # -------------------------------------------------------------------------
-    cli_port:  "/dev/ttyUSB0"
+    # Stable names from 99-foreforce-serial.rules (keyed on CP2105 vendor/
+    # product + USB interface number, independent of plug order/timing).
+    # Falls back to raw /dev/ttyUSBn only if that udev rule isn't installed.
+    cli_port:  "/dev/foreforce-radar-cli"
     cli_baud:  115200
 
-    data_port: "/dev/ttyUSB1"
+    data_port: "/dev/foreforce-radar-data"
     data_baud: 921600
 
     # -------------------------------------------------------------------------

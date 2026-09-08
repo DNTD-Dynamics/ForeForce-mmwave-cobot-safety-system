@@ -32,7 +32,11 @@ dntd_mmwave_safety:
     sensor_mount_link: "tool0"
 
     # XYZ offset (meters) from mount link origin to sensor origin
-    sensor_mount_xyz: [0.0, 0.0, 0.05]
+    # Measured 2026-08-30: 17.5in (0.445m) horizontal from the base
+    # rotation axis, 23.75in (0.603m) height. Height doesn't affect the
+    # rotation-induced velocity compensation for a Z-axis joint -- included
+    # for a complete/consistent vector rather than left at a placeholder.
+    sensor_mount_xyz: [0.445, 0.0, 0.603]
 
     # RPY rotation (radians) from mount link frame to sensor frame
     sensor_mount_rpy: [0.0, 0.0, 0.0]
@@ -43,14 +47,27 @@ dntd_mmwave_safety:
     # Joint names must match your URDF exactly.
     # For stick testing, leave as-is — fake_joint_states.py publishes these.
     # -------------------------------------------------------------------------
+    # Scoped for the 2026-08-30 base-sweep demo: only joint_base is driven,
+    # and the mmWave sensor sits on the fixed link between joint_base and
+    # the shoulder, so it's invariant to how the shoulder/elbow/wrist above
+    # it are posed. This must match what arm_controller_node.py actually
+    # publishes on /joint_states (its JOINT_NAMES list) -- JointStateBuffer
+    # looks up angles by name, so a mismatch here silently defaults every
+    # joint angle to 0.0 rather than erroring.
+    # Restore the full 6-name list here once joint_geometry (below) has a
+    # real loader and multiple joints move together in the same test.
     joint_names:
-      - "joint1"
-      - "joint2"
-      - "joint3"
-      - "joint4"
-      - "joint5"
-      - "joint6"
+      - "joint_base"
 
+    # NOT CURRENTLY LOADED. _build_chain_from_params() in
+    # dntd_mmwave_safety_node.py never declares or reads a
+    # "joint_geometry" parameter, so ROS2 silently drops this whole
+    # block and the chain falls back to a hardcoded 0.1m-per-joint,
+    # Z-axis-only placeholder for every joint regardless of what's
+    # written here. These values also read like UR5 reference DH
+    # parameters, not this arm's real geometry, so they wouldn't help
+    # even with a working loader. Left in place as the intended format
+    # for whoever wires up real per-joint geometry loading later.
     joint_geometry:
       joint1:
         type: revolute
@@ -109,6 +126,24 @@ dntd_mmwave_safety:
     caution_range_m:    1.2
     fast_approach_mps:  -0.8
     min_snr_db:         8.0
+
+    # static_filter_mps — per-point velocity gate in zone_logic.py's
+    # ZoneClassifier, applied AFTER background subtraction, the
+    # micro-doppler classifier, and swept-volume filtering have already
+    # run. Defaults to 0.3 m/s if unset (was unset here, so running at
+    # that default). Confirmed 2026-08-30 as the cause of a stationary
+    # person occasionally reading CLEAR: background_model.py and
+    # classifier.py both have explicit, tested protection for a
+    # motionless person (novelty-aware refresh gate; vote-based scoring
+    # using height/point-count/doppler, not velocity spread alone), but
+    # this gate has neither -- it drops any point below the threshold
+    # regardless of what cluster it belonged to. Set to 0.0 to disable
+    # it entirely. Tradeoff: this was the only remaining check for a
+    # *new* static object introduced mid-session before the next
+    # background re-learn (e.g. someone sets a toolbox near the arm) --
+    # with it at 0.0, that object would read as a permanent STOP instead
+    # of being filtered as clutter.
+    static_filter_mps:  0.0
 
 
     # -------------------------------------------------------------------------
@@ -229,7 +264,11 @@ dntd_mmwave_safety:
     #   Use during initial setup/tuning to verify classifier behavior first.
     # -------------------------------------------------------------------------
     swept_volume_enabled:         true
-    swept_volume_mount_joint_idx: 3      # forearm link (joint 4 on 6-DOF arm)
+    # 0 for today's single-joint chain (only joint_base is in joint_names
+    # above -- index 3 would be out of range). The "3, forearm link"
+    # comment further up describes the planned 3-sensor forearm-mount
+    # hardware, not what's physically on the arm right now.
+    swept_volume_mount_joint_idx: 0
     #swept_volume_max_reach_m:     0.0    # 0 = auto-compute from chain geometry
     swept_volume_max_reach_m:     2.0    # manual — covers full test range, this is for testing only, comment out and remove comment for above for auto-compute on multi-axis arm
     swept_volume_self_radius_m:   0.15   # arm body exclusion radius
