@@ -30,7 +30,7 @@ import numpy as np
 import threading
 import time
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import rclpy
@@ -46,6 +46,7 @@ from background_model import BackgroundModel
 from cluster import ClusterBuilder
 from classifier import MicroDopplerClassifier
 from swept_volume import SweptVolumeClipper
+from presence_hold import StaticPresenceHold
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +345,9 @@ class EgoMotionCompensator:
 # ROS 2 safety node
 # ---------------------------------------------------------------------------
 
+# Zone severity for occupancy-hold comparison (ported from main.py)
+ZONE_SEVERITY = {"CLEAR": 0, "CAUTION": 1, "STOP": 2}
+
 class DntdMmwaveSafetyNode(Node):
     """
     Main ROS 2 node. Wires together:
@@ -366,6 +370,16 @@ class DntdMmwaveSafetyNode(Node):
         self.declare_parameter('fast_approach_mps',        -0.8)
         self.declare_parameter('static_filter_mps',        0.3)
         self.declare_parameter('min_snr_db',               8.0)
+
+        # Static presence hold — ported from main.py's standalone pipeline
+        # (presence_hold.py). Without this, a person who stops moving reads
+        # near-zero velocity, same as static clutter, and the arm could
+        # try to resume with them still standing there.
+        self.declare_parameter('hold_timeout_s',            5.0)
+        self.declare_parameter('release_grace_s',           2.0)
+        # Bridges the gap before presence-hold's sway-detection history
+        # (needs several frames) has built up.
+        self.declare_parameter('occupancy_hold_s',           1.5)
         self.declare_parameter('heartbeat_hz',             5.0)
         self.declare_parameter('output_serial_port',       '')
         self.declare_parameter('output_use_gpio',          False)
@@ -450,6 +464,28 @@ class DntdMmwaveSafetyNode(Node):
             use_gpio    = p['output_use_gpio'],
             mqtt_broker = p['output_mqtt_broker'] or None,
         )
+
+        # --- Static presence hold (ported from main.py's standalone
+        # pipeline / presence_hold.py) ---
+        # Latches STOP once confirmed and holds it via background-model
+        # novelty + micro-Doppler sway detection, so a person who stops
+        # moving inside the hazard zone doesn't read as CLEAR just
+        # because their velocity dropped below the classifier's gates.
+        self._presence = StaticPresenceHold(
+            background_model = self._background,
+            hazard_radius_m  = p['caution_range_m'] + 0.2,
+            hold_timeout_s   = p['hold_timeout_s'],
+            release_grace_s  = p['release_grace_s'],
+        )
+
+        # --- Occupancy hold (also ported from main.py) ---
+        # Bridges the gap between a detection dropping out and
+        # StaticPresenceHold's sway history (needs several frames)
+        # confirming presence -- holds the last-seen zone briefly rather
+        # than snapping straight to CLEAR on a single empty frame.
+        self._occupancy_hold_s = p['occupancy_hold_s']
+        self._last_seen_zone   = None
+        self._last_seen_time   = 0.0
 
         # --- Fault state ---
         self._fault_active  = False
@@ -598,6 +634,38 @@ class DntdMmwaveSafetyNode(Node):
         # Zone classification on workspace-clipped points
         state = self._classifier.update_frame(zone_points)
 
+        # --- Occupancy hold ---
+        # Holds the last-seen zone for a short window after detections
+        # drop, bridging the gap before presence-hold's sway history
+        # has built up. Uses monotonic time, matching this node's other
+        # elapsed-time checks (main.py's reference version uses time.time()).
+        now = time.monotonic()
+        if state.point_count > 0:
+            self._last_seen_zone = state.zone
+            self._last_seen_time = now
+        elif (
+            self._last_seen_zone is not None
+            and (now - self._last_seen_time) < self._occupancy_hold_s
+            and ZONE_SEVERITY[self._last_seen_zone] > ZONE_SEVERITY[state.zone]
+        ):
+            state = replace(
+                state,
+                zone   = self._last_seen_zone,
+                reason = f"Occupancy hold — last detection "
+                         f"{now - self._last_seen_time:.1f}s ago",
+            )
+
+        # --- Static presence hold ---
+        # Operates on ego-motion-compensated but otherwise unfiltered
+        # points (before background/classifier/swept-volume filtering),
+        # same as main.py's use of raw all_points -- it needs to see the
+        # low-velocity sway returns those stages would otherwise drop,
+        # and does its own background-novelty check internally.
+        effective_zone = self._presence.process(state.zone, compensated)
+        if effective_zone != state.zone:
+            state = replace(state, zone=effective_zone,
+                             reason=self._presence.hold_reason)
+
         # Publish zone + downstream outputs
         self._publish_zone(state.zone)
         self._outputs.publish(state)
@@ -738,6 +806,9 @@ class DntdMmwaveSafetyNode(Node):
             'fast_approach_mps':        self.get_parameter('fast_approach_mps').value,
             'static_filter_mps':        self.get_parameter('static_filter_mps').value,
             'min_snr_db':               self.get_parameter('min_snr_db').value,
+            'hold_timeout_s':           self.get_parameter('hold_timeout_s').value,
+            'release_grace_s':          self.get_parameter('release_grace_s').value,
+            'occupancy_hold_s':         self.get_parameter('occupancy_hold_s').value,
             'heartbeat_hz':             self.get_parameter('heartbeat_hz').value,
             'output_serial_port':       self.get_parameter('output_serial_port').value,
             'output_use_gpio':          self.get_parameter('output_use_gpio').value,

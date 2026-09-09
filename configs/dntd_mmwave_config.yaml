@@ -143,7 +143,39 @@ dntd_mmwave_safety:
     # background re-learn (e.g. someone sets a toolbox near the arm) --
     # with it at 0.0, that object would read as a permanent STOP instead
     # of being filtered as clutter.
-    static_filter_mps:  0.0
+    # Restored to the real default 2026-08-30 -- was zeroed out earlier
+    # today as a stopgap for a stationary person reading CLEAR, but that
+    # also let ALL near-zero-velocity residual clutter (self-reflections,
+    # imperfectly-masked mount hardware, sensor noise) through as valid
+    # STOP-range detections, which is what caused the stuck-STOP/no-
+    # movement symptom. Now that StaticPresenceHold is wired in (handles
+    # the stationary-person case independently, via background novelty +
+    # sway detection), this gate can safely go back to filtering real
+    # static clutter again.
+    static_filter_mps:  0.3
+
+    # -------------------------------------------------------------------------
+    # STATIC PRESENCE HOLD (ported from main.py's standalone pipeline)
+    #
+    # Latches STOP once confirmed and holds it via background-model novelty
+    # + micro-Doppler sway detection, so a person who stops moving inside
+    # the hazard zone doesn't read as CLEAR just because their velocity
+    # dropped below the classifier's SNR/velocity gates. Added 2026-08-30
+    # after zeroing static_filter_mps alone wasn't fully fixing a stationary
+    # person occasionally reading CLEAR.
+    #
+    # hold_timeout_s    — seconds of no evidence (novelty or sway) before
+    #                     releasing the hold. 5.0 default from main.py.
+    # release_grace_s   — grace period after the hold condition clears,
+    #                     before actually returning to CLEAR/CAUTION.
+    # occupancy_hold_s  — separate, simpler bridge: holds the last-seen
+    #                     zone briefly after detections drop, covering the
+    #                     gap before presence-hold's sway history (needs
+    #                     several frames) has built up.
+    # -------------------------------------------------------------------------
+    hold_timeout_s:      5.0
+    release_grace_s:     2.0
+    occupancy_hold_s:    1.5
 
 
     # -------------------------------------------------------------------------
