@@ -7,3 +7,6 @@ __pycache__/
 *.DS_Store
 # Environment-specific learned background map — generated per-install, never ship
 *.npz
+configs/*.local.yaml
+__pycache__/
+*.pyc

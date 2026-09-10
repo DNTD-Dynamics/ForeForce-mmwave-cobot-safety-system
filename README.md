@@ -421,7 +421,7 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 
 ForeForce's full pipeline is source-available under BSL 1.1 — read it, run it, learn from it, build non-commercial projects with it. That's deliberate: you should be able to see exactly how a safety system behaves before you trust it near people.
 
-The kit is what makes it deployable. It includes the assembled and tested hardware — no sourcing the evaluation module, building the mount, or wiring it yourself — a commercial license to deploy the code, private-repo access for kit owners, and direct support from the person who built it. It also ships with the production chirp profile: the validated tuning that holds tracking on a person down to ~0.35 m at close range, where the conservative example profile in this repo loses them near 0.5 m. The open code shows you the how; the kit gives you a validated, deployable system and the license to run it.
+The kit is what makes it deployable. It includes the assembled and tested hardware — no sourcing the evaluation module, building the mount, or wiring it yourself — a commercial license to deploy the code, and direct support from the person who built it. It also ships with the production chirp profile, tuned for arm-mounted close-range use where the conservative example profile in this repo is deliberately untuned. The open code shows you the how; the kit gives you a validated, deployable system and the license to run it.
 
 Commercial use of the code requires a license (see below). The kit includes one.
 

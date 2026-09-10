@@ -1,5 +1,5 @@
 // =============================================================================
-// RadarGuard — Arm Controller Firmware
+// ForeForce — Arm Controller Firmware
 // Target: ESP32 DEVKITV1
 // Drivers: 6× TB6600 stepper drivers
 // Switches: 6× KW12-3 SPDT (COM→GND, NC→input pin, internal pullup enabled)
@@ -646,7 +646,7 @@ void setup() {
   currentZone  = ZONE_CLEAR;
   motionFrozen = false;
 
-  Serial.println("RadarGuard Arm Controller ready.");
+  Serial.println("ForeForce Arm Controller ready.");
   Serial.print("MICROSTEP_DIVISOR="); Serial.print(MICROSTEP_DIVISOR);
   Serial.print("  STEPS_PER_REV=");   Serial.println(STEPS_PER_REV);
   Serial.println("Commands: HOME [n] | ZERO <n|ALL> | JOG <n> <steps>");

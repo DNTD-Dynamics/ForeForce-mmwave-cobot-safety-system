@@ -1,10 +1,9 @@
 # dntd_mmwave_config.yaml
-# DNTD Dynamics — mmWave Safety Node Configuration
+# ForeForce — mmWave Safety Node Configuration
 #
-# This file configures the safety node (dntd_mmwave_safety_node.py).
+# Configures the safety node (dntd_mmwave_safety_node.py).
 # For the driver/sensor config see dntd_mmwave_driver_config.yaml.
 #
-# Deploy: <repo>/configs/dntd_mmwave_config.yaml
 # Run from the repo root with:
 #   python3 src/dntd_mmwave_safety_node.py \
 #     --ros-args --params-file configs/dntd_mmwave_config.yaml
@@ -12,243 +11,213 @@
 # No topic remap is needed — the driver node publishes /dntd/mmwave/raw_points
 # directly, which is the topic this node subscribes to.
 #
-# Optional per-site overrides: add a second params file that only contains the
-# keys you want to change, layered after the base config:
+# -----------------------------------------------------------------------------
+# THIS IS A MINIMAL SINGLE-JOINT CONFIG.
+#
+# It is deliberately scoped to what the pipeline actually does today: one
+# rotating joint, with the sensor mounted proximal to every joint that moves.
+# That case is exact, not approximate — if the sensor sits below everything
+# that bends, its position depends only on that one joint.
+#
+# Do not treat the values below as tuned for your arm. At minimum you must set
+# sensor_mount_xyz (Step 2) and joint_names (Step 3) before this means anything
+# on your hardware.
+#
+# Per-site overrides: rather than editing this file, put your own values in a
+# second params file containing only the keys you change, layered after this one:
+#     --params-file configs/dntd_mmwave_config.yaml \
 #     --params-file configs/dntd_mmwave_config.local.yaml
+# `.local.yaml` is gitignored, so bench values never become a commit.
+# -----------------------------------------------------------------------------
 
 dntd_mmwave_safety:
   ros__parameters:
 
-    # -------------------------------------------------------------------------
-    # SENSOR MOUNT
-    # Which URDF link is the sensor rigidly attached to?
-    # Examples:
-    #   UR5 / UR10:   "tool0"
-    #   xArm6:        "link6"
-    #   Custom arm:   whatever you named the forearm or shoulder link
-    #   Humanoid:     "torso_link" or "chest_link"
-    #   Stick test:   "base_link" (sensor is stationary)
-    # -------------------------------------------------------------------------
-    sensor_mount_link: "tool0"
+    # =========================================================================
+    # STEP 1 — SENSOR MOUNT LINK
+    # =========================================================================
+    # NOTE: not currently read by the node. The chain is built from joint_names
+    # plus built-in placeholder geometry, and the sensor offset is applied at
+    # the end of that chain. Kept for forward compatibility with the URDF-driven
+    # chain loader (see roadmap). Setting it has no effect yet.
+    sensor_mount_link: "base_link"
 
-    # XYZ offset (meters) from mount link origin to sensor origin
-    # Measured 2026-08-30: 17.5in (0.445m) horizontal from the base
-    # rotation axis, 23.75in (0.603m) height. Height doesn't affect the
-    # rotation-induced velocity compensation for a Z-axis joint -- included
-    # for a complete/consistent vector rather than left at a placeholder.
-    sensor_mount_xyz: [0.445, 0.0, 0.603]
+    # =========================================================================
+    # STEP 2 — SENSOR OFFSET  ** YOU MUST MEASURE THIS **
+    # =========================================================================
+    # XYZ offset (metres) from the mount link origin to the sensor.
+    #
+    # For a single vertical-axis joint, only the HORIZONTAL distance from the
+    # rotation axis to the sensor affects ego-motion compensation — the height
+    # term drops out of the cross product for a Z-axis rotation. Measure it
+    # bird's-eye: horizontal distance from directly above the pivot to directly
+    # above the sensor, ignoring height. Include the height anyway for a
+    # complete vector; it costs nothing and matters once other joints move.
+    #
+    # The placeholder below is NOT a working default. An offset that does not
+    # match your hardware will mis-compensate the arm's own motion.
+    sensor_mount_xyz: [0.0, 0.0, 0.05]
 
     # RPY rotation (radians) from mount link frame to sensor frame
     sensor_mount_rpy: [0.0, 0.0, 0.0]
 
 
-    # -------------------------------------------------------------------------
-    # KINEMATIC CHAIN
-    # Joint names must match your URDF exactly.
-    # For stick testing, leave as-is — fake_joint_states.py publishes these.
-    # -------------------------------------------------------------------------
-    # Scoped for the 2026-08-30 base-sweep demo: only joint_base is driven,
-    # and the mmWave sensor sits on the fixed link between joint_base and
-    # the shoulder, so it's invariant to how the shoulder/elbow/wrist above
-    # it are posed. This must match what arm_controller_node.py actually
-    # publishes on /joint_states (its JOINT_NAMES list) -- JointStateBuffer
-    # looks up angles by name, so a mismatch here silently defaults every
-    # joint angle to 0.0 rather than erroring.
-    # Restore the full 6-name list here once joint_geometry (below) has a
-    # real loader and multiple joints move together in the same test.
+    # =========================================================================
+    # STEP 3 — KINEMATIC CHAIN
+    # =========================================================================
+    # These names must match exactly what your controller publishes in
+    # /joint_states. The node looks up angles BY NAME — a mismatch does not
+    # error, it silently reads every joint as 0.0 and ego-motion compensation
+    # quietly does nothing. Check with:
+    #     ros2 topic echo /joint_states --once
+    #
+    # arm_controller_node.py in this repo publishes: joint_base, joint_shoulder,
+    # joint_elbow, joint_forearm, joint_wrist1, joint_wrist2.
+    #
+    # List ONLY the joints between the arm base and the sensor mount. Joints
+    # distal to the sensor do not move it and must not be listed.
     joint_names:
       - "joint_base"
 
-    # NOT CURRENTLY LOADED. _build_chain_from_params() in
-    # dntd_mmwave_safety_node.py never declares or reads a
-    # "joint_geometry" parameter, so ROS2 silently drops this whole
-    # block and the chain falls back to a hardcoded 0.1m-per-joint,
-    # Z-axis-only placeholder for every joint regardless of what's
-    # written here. These values also read like UR5 reference DH
-    # parameters, not this arm's real geometry, so they wouldn't help
-    # even with a working loader. Left in place as the intended format
-    # for whoever wires up real per-joint geometry loading later.
+    # -------------------------------------------------------------------------
+    # joint_geometry — NOT CURRENTLY LOADED
+    #
+    # The chain builder does not declare or read this block, so ROS 2 drops it
+    # and the chain falls back to built-in placeholder geometry (0.1 m per
+    # joint, all Z-axis). Consuming it is the next item on the ROS 2 roadmap.
+    #
+    # Consequences today:
+    #   - Single-joint vertical-axis setups are still exact: the placeholder
+    #     axis is correct and the measured sensor offset is applied on top.
+    #   - Multi-joint ego-motion compensation is approximate.
+    #   - The swept-volume clipper detects the placeholder chain and fail-safes
+    #     to full pass-through, so it suppresses nothing.
+    #
+    # The block below shows the intended format; arm_config_gui.py writes it
+    # correctly. Filling it in for your arm is harmless now and takes effect
+    # when the loader lands.
+    # -------------------------------------------------------------------------
     joint_geometry:
-      joint1:
-        type: revolute
-        origin_xyz: [0.0, 0.0, 0.127]
-        origin_rpy: [0.0, 0.0, 0.0]
-        axis: [0.0, 0.0, 1.0]
-      joint2:
+      joint_base:
         type: revolute
         origin_xyz: [0.0, 0.0, 0.0]
-        origin_rpy: [1.5708, 0.0, 0.0]
-        axis: [0.0, 1.0, 0.0]
-      joint3:
-        type: revolute
-        origin_xyz: [0.425, 0.0, 0.0]
         origin_rpy: [0.0, 0.0, 0.0]
-        axis: [0.0, 1.0, 0.0]
-      joint4:
-        type: revolute
-        origin_xyz: [0.392, 0.0, 0.0]
-        origin_rpy: [1.5708, 0.0, 0.0]
-        axis: [0.0, 0.0, 1.0]
-      joint5:
-        type: revolute
-        origin_xyz: [0.0, 0.109, 0.0]
-        origin_rpy: [-1.5708, 0.0, 0.0]
-        axis: [0.0, 1.0, 0.0]
-      joint6:
-        type: revolute
-        origin_xyz: [0.0, -0.093, 0.0]
-        origin_rpy: [1.5708, 0.0, 0.0]
-        axis: [0.0, 0.0, 1.0]
+        axis: [0.0, 0.0, 1.0]     # vertical rotation axis
 
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # TIMING
-    # -------------------------------------------------------------------------
+    # =========================================================================
     interpolate_joint_states: true
     joint_states_timeout_s: 0.5
     heartbeat_hz: 5.0
 
 
-    # -------------------------------------------------------------------------
-    # ZONE GEOMETRY (meters)
-    # Tune these to match your arm's reach and operating environment.
-    #
-    # Tuning guide:
-    #   stop_range_m    — minimum safe clearance at max arm speed
-    #                     start at 0.5m, reduce only after controlled testing
-    #   caution_range_m — should give enough time to decelerate
-    #                     typically 2-3x stop_range
-    #   fast_approach_mps — lower = more sensitive (more false positives)
-    #                       0.8 m/s ≈ brisk walk / stumble speed
-    #                       raise for industrial environments with fast workers
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # STEP 4 — ZONE GEOMETRY (metres)
+    # =========================================================================
+    #   stop_range_m      — minimum safe clearance at max arm speed. Start at
+    #                       0.5 m; reduce only after controlled testing.
+    #   caution_range_m   — should allow enough time to decelerate. Typically
+    #                       2-3x stop_range.
+    #   fast_approach_mps — lower = more sensitive. -0.8 m/s ≈ brisk walk.
+    #   static_filter_mps — drops near-static returns (walls, furniture, mount
+    #                       hardware). A stationary person also falls below this
+    #                       threshold; that case is handled by the presence hold
+    #                       below, NOT by lowering this value. Setting it to 0.0
+    #                       lets every residual clutter return through as a valid
+    #                       detection and will pin the arm in STOP.
     stop_range_m:       0.5
     caution_range_m:    1.2
     fast_approach_mps:  -0.8
+    static_filter_mps:  0.3
     min_snr_db:         8.0
 
-    # static_filter_mps — per-point velocity gate in zone_logic.py's
-    # ZoneClassifier, applied AFTER background subtraction, the
-    # micro-doppler classifier, and swept-volume filtering have already
-    # run. Defaults to 0.3 m/s if unset (was unset here, so running at
-    # that default). Confirmed 2026-08-30 as the cause of a stationary
-    # person occasionally reading CLEAR: background_model.py and
-    # classifier.py both have explicit, tested protection for a
-    # motionless person (novelty-aware refresh gate; vote-based scoring
-    # using height/point-count/doppler, not velocity spread alone), but
-    # this gate has neither -- it drops any point below the threshold
-    # regardless of what cluster it belonged to. Set to 0.0 to disable
-    # it entirely. Tradeoff: this was the only remaining check for a
-    # *new* static object introduced mid-session before the next
-    # background re-learn (e.g. someone sets a toolbox near the arm) --
-    # with it at 0.0, that object would read as a permanent STOP instead
-    # of being filtered as clutter.
-    # Restored to the real default 2026-08-30 -- was zeroed out earlier
-    # today as a stopgap for a stationary person reading CLEAR, but that
-    # also let ALL near-zero-velocity residual clutter (self-reflections,
-    # imperfectly-masked mount hardware, sensor noise) through as valid
-    # STOP-range detections, which is what caused the stuck-STOP/no-
-    # movement symptom. Now that StaticPresenceHold is wired in (handles
-    # the stationary-person case independently, via background novelty +
-    # sway detection), this gate can safely go back to filtering real
-    # static clutter again.
-    static_filter_mps:  0.3
 
-    # -------------------------------------------------------------------------
-    # STATIC PRESENCE HOLD (ported from main.py's standalone pipeline)
+    # =========================================================================
+    # STEP 5 — STATIC PRESENCE HOLD
+    # =========================================================================
+    # Once STOP is confirmed, holds it while a person remains in the stop zone,
+    # even after they stop moving and the classifier can no longer see them.
     #
-    # Latches STOP once confirmed and holds it via background-model novelty
-    # + micro-Doppler sway detection, so a person who stops moving inside
-    # the hazard zone doesn't read as CLEAR just because their velocity
-    # dropped below the classifier's SNR/velocity gates. Added 2026-08-30
-    # after zeroing static_filter_mps alone wasn't fully fixing a stationary
-    # person occasionally reading CLEAR.
+    #   hold_timeout_s   — seconds with no presence evidence before releasing.
+    #   release_grace_s  — grace period after the hold clears, before resuming.
+    #   occupancy_hold_s — short separate bridge: holds the last-seen zone when
+    #                      detections momentarily drop out.
     #
-    # hold_timeout_s    — seconds of no evidence (novelty or sway) before
-    #                     releasing the hold. 5.0 default from main.py.
-    # release_grace_s   — grace period after the hold condition clears,
-    #                     before actually returning to CLEAR/CAUTION.
-    # occupancy_hold_s  — separate, simpler bridge: holds the last-seen
-    #                     zone briefly after detections drop, covering the
-    #                     gap before presence-hold's sway history (needs
-    #                     several frames) has built up.
-    # -------------------------------------------------------------------------
+    # BEFORE TRUSTING THIS: occupancy evidence is scoped to stop_range_m, which
+    # assumes persistent static reflectors sit OUTSIDE that radius. A stubborn
+    # unlearned reflector INSIDE the stop range will hold STOP indefinitely.
+    # Watch an empty workspace for a minute with the node's diagnostic log and
+    # note the range of anything that persists. If it lands inside your stop
+    # range: mask it physically, raise min_snr_db, or tune cfarCfg in the chirp
+    # profile to suppress it.
     hold_timeout_s:      5.0
     release_grace_s:     2.0
     occupancy_hold_s:    1.5
 
-    # presence_hold_use_novelty — let presence-hold use background-model
-    # novelty as evidence that someone is still there. OFF until the
-    # background model voxelizes in a fixed world frame: right now
-    # compensate() only corrects velocity and leaves positions in the
-    # SENSOR frame, so on a rotating arm the learned map is only valid at
-    # the angle it was learned at. Any other base angle makes every wall
-    # within the 1.4m hazard radius read as "novel" and STOP never releases
-    # (found 2026-09-09 -- the classifier's static_filter velocity gate had
-    # been masking this the whole time). Sway detection is velocity-based
-    # and unaffected, so presence-hold still works via that path.
-    # Flip to true once positions are transformed via FK before voxelizing.
+    # presence_hold_use_novelty — allow the presence hold to use background-model
+    # novelty as evidence, in addition to occupancy.
+    #
+    # DEFAULT FALSE, and leave it false on a moving mount. Ego-motion
+    # compensation corrects the velocity field only; point POSITIONS stay in the
+    # sensor frame, so the background model voxelizes relative to the sensor
+    # rather than the room. The learned map is therefore only valid at the base
+    # angle it was learned at — at a materially different angle, static geometry
+    # reads as novel and this path will hold STOP indefinitely.
+    #
+    # Safe to enable on a FIXED (non-rotating) mount, where it is a stronger
+    # presence signal than occupancy alone. Moving voxelization into a fixed
+    # world frame is on the roadmap and will remove this restriction.
     presence_hold_use_novelty: false
 
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # BACKGROUND LEARNING
+    # =========================================================================
+    # Learns the static scene at startup; afterwards only novel objects reach
+    # the classifier. The arm holds STOP during learning.
     #
-    # The sensor learns the static environment (walls, fixtures, arm mount)
-    # during startup. After learning, only novel objects (people, tools)
-    # trigger zone responses. The arm will hold STOP during learning.
+    # RELEARN AFTER MOVING THE ARM **OR CHANGING ITS POSE** — see the sensor
+    # frame note above. A saved map is reloaded automatically and skips the
+    # learning phase silently, so a stale map gives no visible warning.
+    #     ros2 topic pub --once /dntd/relearn_background std_msgs/Bool "data: true"
     #
-    # background_learning_s — how long to learn the static scene
-    #   Tune this for your environment:
-    #   - Small controlled lab:    5–10s
-    #   - Typical workshop:        15s  (default)
-    #   - Cluttered environment:   30s
-    #   - Complex changing space:  30s+ with continuous decay
-    #
-    # background_voxel_size_m — spatial resolution of background grid (meters)
-    #   Smaller = finer detail but more memory. 0.10m (10cm) suits most arms.
-    #   Reduce to 0.05m for precision work near cluttered surfaces.
-    #
-    # background_hit_threshold — fraction of learning frames a voxel must
-    #   appear in to count as background (0.0–1.0).
-    #   Lower = more aggressive masking (may mask slow-moving objects).
-    #   Higher = stricter (walls may not fully mask if sensor vibrates).
-    #   0.30 (30% of frames) is a safe default.
-    # -------------------------------------------------------------------------
+    #   background_learning_s    — 5-10 s small controlled lab, 15 s typical
+    #                              workshop, 30 s+ cluttered or changing space.
+    #   background_voxel_size_m  — smaller = finer detail, more memory. 0.05 m
+    #                              for precision work near clutter.
+    #   background_hit_threshold — fraction of learning frames a voxel must
+    #                              appear in to count as background (0.0-1.0).
+    #                              Lower = more aggressive masking.
     background_learning_s:    15.0
     background_voxel_size_m:  0.10
     background_hit_threshold: 0.30
 
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # MICRO-DOPPLER CLASSIFIER
-    #
-    # Rule-based classifier that distinguishes people from objects (falling
-    # tools, vibrating equipment, debris) using cluster features extracted
-    # from the novel point cloud.
+    # =========================================================================
+    # Rule-based person/object scoring on clustered returns.
     #
     # Safety stance: FAIL-SAFE
-    #   PERSON  → passes to zone logic normally
+    #   PERSON  → passes to zone logic
     #   UNKNOWN → passes to zone logic (treated as PERSON)
-    #   OBJECT  → suppressed, logged to <repo>/logs/classifier_training.csv
+    #   OBJECT  → suppressed, logged to logs/classifier_training.csv
     #
-    # classifier_enabled — set false to bypass entirely (all novel points
-    #   pass through unfiltered, original behavior restored)
+    # If it suppresses every cluster while novel points exist, the originals
+    # pass through rather than reporting a false CLEAR.
     #
-    # Tuning guide:
-    #   velocity_spread_min — lower = more sensitive (more false positives)
-    #                         raise if stationary equipment gets flagged
-    #   height_span_min     — lower = catches crouching people
-    #                         raise if floor-level clutter causes false positives
-    #   score_threshold     — 1 = very sensitive, 4 = very strict
-    #                         2 (default) is conservative fail-safe
-    #   eps_m               — DBSCAN cluster radius. Raise for sparser clouds.
+    #   velocity_spread_min — lower = more sensitive. Raise if stationary
+    #                         equipment gets flagged.
+    #   height_span_min     — lower catches crouching people. Raise if
+    #                         floor-level clutter causes false positives.
+    #   score_threshold     — 1 very sensitive, 4 very strict. 2 is the
+    #                         conservative fail-safe default.
+    #   eps_m               — DBSCAN cluster radius. Raise for sparse clouds.
     #
-    # Training data:
-    #   classifier_log_enabled=true automatically logs suppressed OBJECT
-    #   detections to CSV. This builds your labeled dataset for Phase 6b
-    #   ML model training without any extra work.
-    # -------------------------------------------------------------------------
+    # classifier_log_enabled builds a labelled dataset for future ML scoring
+    # at no extra effort.
     classifier_enabled:             true
     classifier_eps_m:               0.40
     classifier_min_points:          2
@@ -256,67 +225,49 @@ dntd_mmwave_safety:
     classifier_height_span_min:     0.10
     classifier_point_count_min:     3
     classifier_score_threshold:     2
-    classifier_log_enabled:         true   # logs suppressed objects for ML training
+    classifier_log_enabled:         true
 
 
-    # -------------------------------------------------------------------------
-    # OUTPUT INTERFACES
-    # All optional — leave blank/false to disable.
-    # Serial, GPIO, and MQTT publish simultaneously if configured.
-    # -------------------------------------------------------------------------
-
-    # Serial: "CLEAR\n" / "CAUTION\n" / "STOP\n"
-    # Examples: "/dev/ttyACM0" (Arduino), "/dev/ttyS0" (Pi UART)
-    output_serial_port: ""
-
-    # GPIO (Raspberry Pi BCM only): pin 17=CLEAR, 27=CAUTION, 22=STOP
-    output_use_gpio: false
-
-    # MQTT broker for Sterling integration
-
-
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # SWEPT-VOLUME WORKSPACE CLIPPER
+    # =========================================================================
+    # Suppresses detections outside the arm's reachable envelope, and inside the
+    # self-exclusion sphere around the mount (the arm's own body).
     #
-    # Defines the reachable workspace of the arm from the sensor mount point.
-    # Detections outside the reachable envelope are suppressed — the arm
-    # physically cannot reach them so they are not a safety concern.
-    # Detections inside the self-exclusion zone are the arm's own body.
+    # INERT ON A PLACEHOLDER CHAIN. Because joint_geometry is not yet loaded
+    # (Step 3), the clipper detects placeholder geometry and fail-safes to full
+    # pass-through — it currently suppresses nothing. This is a fail-safe, not a
+    # failure: pass-through never drops a real detection.
     #
-    # This is what makes arm-mounted mmWave fundamentally different from
-    # fixed-mount sensors — the system knows its own geometry.
-    #
-    # Hardware configuration (3× IWR6843AOP on forearm):
-    #   Sensors mount on the forearm link between joint 3 and joint 4.
-    #   mount_joint_idx: 3 (0-indexed, so joint 4 on a 6-DOF arm)
-    #
-    # swept_volume_max_reach_m:
-    #   0.0 = auto-compute from kinematic chain link lengths (recommended)
-    #   Set manually if auto-compute doesn't match your physical arm.
-    #   Measured from the mount joint origin to the end effector tip.
-    #
-    # swept_volume_self_radius_m:
-    #   Exclusion sphere around the mount point — suppresses returns
-    #   from the arm's own body. Set to roughly half the arm link diameter.
-    #   Default 0.15m suits most 6-DOF collaborative arms.
-    #
-    # swept_volume_reach_margin_m:
-    #   Safety margin added to max reach. Catches detections just outside
-    #   the nominal boundary. Default 0.20m recommended.
-    #
-    # swept_volume_enabled:
-    #   Set false to bypass entirely — all points pass through unfiltered.
-    #   Use during initial setup/tuning to verify classifier behavior first.
-    # -------------------------------------------------------------------------
+    #   mount_joint_idx  — 0-indexed joint the sensor is mounted at, indexed into
+    #                      joint_names above. Must be a valid index into that
+    #                      list: 0 for the single-joint config here.
+    #   max_reach_m      — 0.0 auto-computes from distal link lengths. With a
+    #                      single-joint chain there are no distal joints, so
+    #                      auto-compute falls to its 0.30 m floor — set this
+    #                      manually to your arm's actual reach instead.
+    #   self_radius_m    — exclusion sphere around the mount, roughly half the
+    #                      arm link diameter.
+    #   reach_margin_m   — margin beyond nominal reach.
     swept_volume_enabled:         true
-    # 0 for today's single-joint chain (only joint_base is in joint_names
-    # above -- index 3 would be out of range). The "3, forearm link"
-    # comment further up describes the planned 3-sensor forearm-mount
-    # hardware, not what's physically on the arm right now.
     swept_volume_mount_joint_idx: 0
-    #swept_volume_max_reach_m:     0.0    # 0 = auto-compute from chain geometry
-    swept_volume_max_reach_m:     2.0    # manual — covers full test range, this is for testing only, comment out and remove comment for above for auto-compute on multi-axis arm
-    swept_volume_self_radius_m:   0.15   # arm body exclusion radius
-    swept_volume_reach_margin_m:  0.20   # safety margin beyond nominal reach
+    swept_volume_max_reach_m:     1.0
+    swept_volume_self_radius_m:   0.15
+    swept_volume_reach_margin_m:  0.20
 
-    output_mqtt_broker: ""   # e.g. "0.0.0.0"
+
+    # =========================================================================
+    # OUTPUT INTERFACES
+    # =========================================================================
+    # All optional. Serial, GPIO, and MQTT publish simultaneously if set.
+    #
+    # LEAVE output_serial_port EMPTY if you are using arm_controller_node.py.
+    # That node already owns the ESP32 serial port — it reads /joint_states from
+    # it and writes zone commands back. Two processes opening the same port will
+    # collide. This path is for driving a board directly with no ROS 2 bridge.
+    #
+    # Serial writes bare "CLEAR\n" / "CAUTION\n" / "STOP\n".
+    # GPIO (Raspberry Pi BCM): 17=CLEAR, 27=CAUTION, 22=STOP.
+    output_serial_port: ""
+    output_use_gpio:    false
+    output_mqtt_broker: ""
