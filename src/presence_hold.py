@@ -31,7 +31,9 @@ State machine
     1. Background model novelty (preferred)
        If BackgroundModel is wired in, a voxel that is occupied but not in
        the learned background is novel — someone is there.  STOP is held as
-       long as any novel voxel falls inside the stop or caution radius.
+       long as novel returns appear consistently inside the hazard radius
+       (debounced over a short frame window with an SNR floor, so sporadic
+       unlearned clutter can't keep the hold latched on its own).
 
     2. Micro-Doppler sway detection (fallback, always active)
        Real people standing still generate tiny involuntary movement:
@@ -122,6 +124,33 @@ DEFAULT_SWAY_MIN_HITS        = 4      # hits in window to confirm presence
 # Minimum SNR for sway returns to count — below this is noise floor
 DEFAULT_SWAY_MIN_SNR_DB      = 6.0
 
+# Background-novelty evidence debounce.  Same shape as the sway window:
+# a novel point in the hazard zone on a single frame is NOT enough --
+# sporadic clutter the background model never learned (furniture edges,
+# multipath ghosts, noise-floor returns that only show up in <30% of
+# learning frames) would otherwise reset the hold timeout every time it
+# flickered into view, holding STOP indefinitely with nobody present.
+# A real person is a large, consistent reflector and clears 4/10 easily.
+DEFAULT_NOVEL_WINDOW_FRAMES  = 10
+DEFAULT_NOVEL_MIN_HITS       = 4
+
+# Occupancy evidence: a point simply being present in the hazard zone,
+# regardless of its velocity.
+#
+# Why this exists: the sway path above assumes involuntary motion shows up
+# as 0.02-0.25 m/s returns. That requires finer doppler resolution than a
+# standard 16-chirp-loop profile provides -- measured 2026-09-09 on the
+# IWR6843AOP with profile_AOP.cfg, a stationary person's returns quantize
+# to exactly 0.000 m/s, one doppler bin being far wider than the whole sway
+# band. No sway_min value can recover that; there is nothing between zero
+# and one bin. Occupancy is what remains, and the same logs show it works:
+# a consistent return sits in the hazard zone the entire time.
+#
+# IMPORTANT: the caller must pass background-subtracted (novel) points for
+# this to mean "someone is there" rather than "the room exists".
+DEFAULT_OCCUPANCY_WINDOW_FRAMES = 10
+DEFAULT_OCCUPANCY_MIN_HITS      = 4
+
 
 class StaticPresenceHold:
     """
@@ -143,6 +172,12 @@ class StaticPresenceHold:
         sway_window:       int   = DEFAULT_SWAY_WINDOW_FRAMES,
         sway_min_hits:     int   = DEFAULT_SWAY_MIN_HITS,
         sway_min_snr:      float = DEFAULT_SWAY_MIN_SNR_DB,
+        novel_window:      int   = DEFAULT_NOVEL_WINDOW_FRAMES,
+        novel_min_hits:    int   = DEFAULT_NOVEL_MIN_HITS,
+        use_occupancy:     bool  = True,
+        occupancy_window:  int   = DEFAULT_OCCUPANCY_WINDOW_FRAMES,
+        occupancy_min_hits: int  = DEFAULT_OCCUPANCY_MIN_HITS,
+        occupancy_radius_m: float = None,
     ):
         self._bg              = background_model
         self.hazard_radius    = hazard_radius_m
@@ -152,6 +187,20 @@ class StaticPresenceHold:
         self.sway_max         = sway_max_mps
         self.sway_min_snr     = sway_min_snr
         self.sway_min_hits    = sway_min_hits
+        self.novel_min_hits   = novel_min_hits
+        self.use_occupancy    = use_occupancy
+        self.occupancy_min_hits = occupancy_min_hits
+        # Occupancy evidence uses its own, tighter radius than the sway and
+        # novelty paths. Measured 2026-09-09: a fixed reflector sat at a
+        # rock-steady 0.96m producing one 0.000 m/s return indefinitely,
+        # which background learning never absorbed -- across the full 1.4m
+        # hazard radius that alone held STOP forever. Scoping occupancy to
+        # the stop range keeps the hold tied to the zone it is actually
+        # holding. Defaults to hazard_radius when unset.
+        self.occupancy_radius = (
+            occupancy_radius_m if occupancy_radius_m is not None
+            else hazard_radius_m
+        )
 
         self._lock            = threading.Lock()
         self._state           = "IDLE"
@@ -162,6 +211,10 @@ class StaticPresenceHold:
 
         # Sliding window: True if that frame had a sway return in hazard zone
         self._sway_history    = deque(maxlen=sway_window)
+        # Sliding window: True if that frame had a novel return in hazard zone
+        self._novel_history   = deque(maxlen=novel_window)
+        # Sliding window: True if that frame had any point in hazard zone
+        self._occupancy_history = deque(maxlen=occupancy_window)
 
     # ------------------------------------------------------------------
     # Public API
@@ -208,6 +261,16 @@ class StaticPresenceHold:
         hazard_points  = self._points_in_hazard(raw_points)
         novel_present  = self._novel_in_hazard(raw_points)
         sway_present   = self._update_sway(hazard_points)
+
+        # Occupancy is folded in alongside sway: both mean "a person is
+        # present but not moving enough for the classifier to see them".
+        # Kept as a separate window so each debounces independently.
+        occupancy_present = (
+            self._update_occupancy(hazard_points) if self.use_occupancy
+            else False
+        )
+        if occupancy_present:
+            sway_present = True
 
         if self._state == "IDLE":
             return self._idle(classifier_zone, now)
@@ -261,6 +324,8 @@ class StaticPresenceHold:
         if sway_present:
             self._last_seen   = now
             self._hold_reason = (
+                "Occupancy in hazard zone — person present, not moving"
+                if self.use_occupancy else
                 f"Micro-Doppler sway detected ({self.sway_min:.2f}–"
                 f"{self.sway_max:.2f} m/s) — person likely stationary in zone"
             )
@@ -328,22 +393,61 @@ class StaticPresenceHold:
     # Evidence helpers
     # ------------------------------------------------------------------
 
+    def _update_occupancy(self, hazard_points: list) -> bool:
+        """
+        Detect presence by occupancy: any point inside the hazard zone,
+        regardless of velocity, debounced over a frame window.
+
+        This is the evidence path that actually works at standard doppler
+        resolution, where a stationary person's returns quantize to exactly
+        0.000 m/s and the sway band is unreachable (see module constants).
+
+        Assumes the caller passes background-subtracted points -- otherwise
+        every wall in the room counts as presence.
+        """
+        occupied_this_frame = any(
+            _range(p) <= self.occupancy_radius for p in hazard_points
+        )
+        self._occupancy_history.append(occupied_this_frame)
+
+        if len(self._occupancy_history) < self.occupancy_min_hits:
+            return False   # not enough history yet
+
+        return sum(self._occupancy_history) >= self.occupancy_min_hits
+
     def _points_in_hazard(self, points: list) -> list:
         """Return all points (regardless of velocity) inside hazard radius."""
         return [p for p in points if _range(p) <= self.hazard_radius]
 
     def _novel_in_hazard(self, points: list) -> bool:
         """
-        Return True if the background model sees any novel point in the
-        hazard zone.  Falls back to False if no background model is wired.
+        Return True if the background model has seen a novel point in the
+        hazard zone consistently enough to count as presence.
+
+        Debounced the same way as sway detection: a single novel return on
+        a single frame is not evidence -- sporadic clutter the background
+        model never learned would otherwise reset the hold timeout every
+        time it flickered into view.  Requires novel_min_hits frames out of
+        the last novel_window, and each return must clear the SNR floor.
+
+        Falls back to False if no background model is wired.
         """
-        if self._bg is None or self._bg.state != "ACTIVE":
-            return False
-        hazard = self._points_in_hazard(points)
-        if not hazard:
-            return False
-        novel = self._bg.filter_novel(hazard)
-        return len(novel) > 0
+        novel_this_frame = False
+        if self._bg is not None and self._bg.state == "ACTIVE":
+            hazard = self._points_in_hazard(points)
+            if hazard:
+                novel = [
+                    p for p in self._bg.filter_novel(hazard)
+                    if getattr(p, 'snr', 15.0) >= self.sway_min_snr
+                ]
+                novel_this_frame = len(novel) > 0
+
+        self._novel_history.append(novel_this_frame)
+
+        if len(self._novel_history) < self.novel_min_hits:
+            return False   # not enough history yet
+
+        return sum(self._novel_history) >= self.novel_min_hits
 
     def _update_sway(self, hazard_points: list) -> bool:
         """

@@ -218,30 +218,29 @@ class SweptVolumeClipper:
 
     def _get_mount_position(self, q: dict) -> np.ndarray:
         """
-        Walk the kinematic chain to the mount joint and return its
-        world-frame origin position.
+        Return the mount joint's origin in the SENSOR frame — the same
+        frame the detection points are in.
+
+        Frame note (fixed 2026-09-09): this previously walked the chain
+        with FK and returned a WORLD-frame position, then contains()
+        subtracted it from sensor-frame point coordinates. Mixing frames
+        made the distance meaningless. EgoMotionCompensator.compensate()
+        only corrects the velocity field — point positions stay in the
+        sensor frame as parsed.
+
+        No FK needed here: the sensor is rigidly bolted to the mount link,
+        so in the sensor frame the mount sits at a fixed offset regardless
+        of joint angles. Both boundaries are spheres centred on that point,
+        and spheres are rotation-invariant, so this is exact rather than an
+        approximation. q is accepted for API compatibility and unused.
+
+        T_mount maps mount-link frame → sensor frame, so the mount origin
+        in sensor frame is T_mount⁻¹ applied to the origin: -Rᵀ·t.
         """
-        joints = self._chain.joints
-        T_world = np.eye(4)
-
-        for i, joint in enumerate(joints):
-            T_world = T_world @ joint.origin
-
-            if i == self._mount_idx:
-                # This is the mount joint — return its world position
-                return T_world[:3, 3].copy()
-
-            if joint.type in ('revolute', 'continuous', 'prismatic'):
-                angle = q.get(joint.name, 0.0)
-                T_world = T_world @ self._chain._joint_transform(joint, angle)
-
-        # Mount index beyond chain length — return end effector position
-        logger.warning(
-            f"SweptVolume: mount_joint_idx {self._mount_idx} >= chain length "
-            f"{len(joints)} — using end effector position"
-        )
-        T_sensor = T_world @ self._chain.T_mount
-        return T_sensor[:3, 3].copy()
+        T_mount = self._chain.T_mount
+        R = T_mount[:3, :3]
+        t = T_mount[:3, 3]
+        return -(R.T @ t)
 
     def _compute_distal_reach(self) -> float:
         """
@@ -275,8 +274,12 @@ class SweptVolumeClipper:
             return True
 
         # Check: are all joint origins identical (placeholder pattern)?
+        # Guard len>1: all() over the empty joints[1:] of a single-joint
+        # chain is vacuously True, which previously made EVERY one-joint
+        # chain look like a placeholder and silently turned the whole
+        # clipper into a no-op, even with real measured geometry.
         first_t = joints[0].origin[:3, 3]
-        all_same = all(
+        all_same = len(joints) > 1 and all(
             np.allclose(j.origin[:3, 3], first_t, atol=1e-3)
             for j in joints[1:]
         )

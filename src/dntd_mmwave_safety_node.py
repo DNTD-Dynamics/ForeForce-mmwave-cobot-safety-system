@@ -27,6 +27,7 @@ Config (YAML, see dntd_mmwave_config.yaml):
 """
 
 import numpy as np
+import math
 import threading
 import time
 import logging
@@ -380,6 +381,15 @@ class DntdMmwaveSafetyNode(Node):
         # Bridges the gap before presence-hold's sway-detection history
         # (needs several frames) has built up.
         self.declare_parameter('occupancy_hold_s',           1.5)
+        # Whether presence-hold may use background-model novelty as
+        # evidence. Default False until point positions are transformed
+        # into a fixed world frame before voxelization -- compensate()
+        # currently only corrects velocity and leaves positions in the
+        # SENSOR frame, so on a rotating arm the learned background is
+        # only valid at the exact angle it was learned at; at any other
+        # angle every wall reads as "novel" and holds STOP indefinitely.
+        # Sway detection (velocity-based) is unaffected and stays active.
+        self.declare_parameter('presence_hold_use_novelty', False)
         self.declare_parameter('heartbeat_hz',             5.0)
         self.declare_parameter('output_serial_port',       '')
         self.declare_parameter('output_use_gpio',          False)
@@ -472,8 +482,13 @@ class DntdMmwaveSafetyNode(Node):
         # moving inside the hazard zone doesn't read as CLEAR just
         # because their velocity dropped below the classifier's gates.
         self._presence = StaticPresenceHold(
-            background_model = self._background,
+            background_model = (self._background
+                                if p['presence_hold_use_novelty'] else None),
             hazard_radius_m  = p['caution_range_m'] + 0.2,
+            # Occupancy evidence scoped to the stop range -- see the
+            # occupancy_radius note in presence_hold.py for why it is
+            # tighter than the hazard radius.
+            occupancy_radius_m = p['stop_range_m'],
             hold_timeout_s   = p['hold_timeout_s'],
             release_grace_s  = p['release_grace_s'],
         )
@@ -657,14 +672,53 @@ class DntdMmwaveSafetyNode(Node):
 
         # --- Static presence hold ---
         # Operates on ego-motion-compensated but otherwise unfiltered
-        # points (before background/classifier/swept-volume filtering),
-        # same as main.py's use of raw all_points -- it needs to see the
-        # low-velocity sway returns those stages would otherwise drop,
-        # and does its own background-novelty check internally.
-        effective_zone = self._presence.process(state.zone, compensated)
+        # Operates on zone_points (post background-subtraction, post
+        # swept-volume self-exclusion) rather than raw compensated points.
+        # Using raw points here (matching main.py's simpler standalone
+        # pipeline, which has no swept-volume/self-exclusion concept at
+        # all) meant presence-hold's own independent novelty check saw
+        # the arm's own unmasked structure near the mount and treated it
+        # as a permanent person -- confirmed 2026-08-30 via the diagnostic
+        # log showing pts=0 in the classifier itself while presence-hold
+        # kept re-latching on "novel voxel in hazard zone" anyway.
+        # zone_points still preserves what presence-hold actually needs:
+        # points the classifier's own internal velocity/SNR gate would
+        # drop, since that gate runs *after* this, inside update_frame().
+        effective_zone = self._presence.process(state.zone, zone_points)
         if effective_zone != state.zone:
             state = replace(state, zone=effective_zone,
                              reason=self._presence.hold_reason)
+
+        # Diagnostic: throttled to 1/s so it's readable rather than a
+        # 10Hz flood, but always on -- state.reason/closest_m weren't
+        # visible anywhere before this. Temporary while debugging the
+        # STOP-not-releasing issue; fine to leave in or remove later.
+        #
+        # hz=... reports what presence-hold actually sees: how many points
+        # sit inside its hazard radius, and their |velocity| spread. The
+        # sway band is 0.02-0.25 m/s -- returns below 0.02 are treated as
+        # noise and count as NO evidence, so this shows directly whether a
+        # stationary person is producing usable sway returns or falling
+        # under the floor.
+        _hz_r = self._presence.hazard_radius
+        _hz = [(math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z), p)
+               for p in zone_points]
+        _hz = [(r, p) for r, p in _hz if r <= _hz_r]
+        if _hz:
+            _hz.sort(key=lambda rp: rp[0])
+            _rngs = ",".join(f"{r:.2f}" for r, _ in _hz[:6])
+            _v = sorted(abs(p.velocity) for _, p in _hz)
+            _in_band = sum(1 for v in _v if 0.02 <= v <= 0.25)
+            _hz_str = (f"hz={len(_hz)}pts r=[{_rngs}] "
+                       f"|v|={_v[0]:.3f}-{_v[-1]:.3f} inband={_in_band}")
+        else:
+            _hz_str = f"hz=0pts (zone_points={len(zone_points)})"
+
+        self.get_logger().info(
+            f"{state} | presence={self._presence.state} "
+            f"({self._presence.hold_reason or 'n/a'}) | {_hz_str}",
+            throttle_duration_sec=1.0,
+        )
 
         # Publish zone + downstream outputs
         self._publish_zone(state.zone)
@@ -809,6 +863,7 @@ class DntdMmwaveSafetyNode(Node):
             'hold_timeout_s':           self.get_parameter('hold_timeout_s').value,
             'release_grace_s':          self.get_parameter('release_grace_s').value,
             'occupancy_hold_s':         self.get_parameter('occupancy_hold_s').value,
+            'presence_hold_use_novelty': self.get_parameter('presence_hold_use_novelty').value,
             'heartbeat_hz':             self.get_parameter('heartbeat_hz').value,
             'output_serial_port':       self.get_parameter('output_serial_port').value,
             'output_use_gpio':          self.get_parameter('output_use_gpio').value,

@@ -177,6 +177,19 @@ dntd_mmwave_safety:
     release_grace_s:     2.0
     occupancy_hold_s:    1.5
 
+    # presence_hold_use_novelty — let presence-hold use background-model
+    # novelty as evidence that someone is still there. OFF until the
+    # background model voxelizes in a fixed world frame: right now
+    # compensate() only corrects velocity and leaves positions in the
+    # SENSOR frame, so on a rotating arm the learned map is only valid at
+    # the angle it was learned at. Any other base angle makes every wall
+    # within the 1.4m hazard radius read as "novel" and STOP never releases
+    # (found 2026-09-09 -- the classifier's static_filter velocity gate had
+    # been masking this the whole time). Sway detection is velocity-based
+    # and unaffected, so presence-hold still works via that path.
+    # Flip to true once positions are transformed via FK before voxelizing.
+    presence_hold_use_novelty: false
+
 
     # -------------------------------------------------------------------------
     # BACKGROUND LEARNING
