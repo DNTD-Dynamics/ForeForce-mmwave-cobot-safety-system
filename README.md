@@ -161,6 +161,10 @@ The `--min-velocity` filter that eliminates false triggers from walls and mount 
 
 **Occupancy hold** (`presence_hold.py`, default evidence path): once STOP is confirmed, any return persisting inside the stop radius holds STOP, regardless of velocity — debounced over a rolling frame window so a single flickering return can't latch it. The hold releases after evidence is absent for `--hold-timeout` seconds, followed by `--release-grace` seconds of grace. This works because the points reaching it are already background-subtracted, so a return inside the zone means *something new is there*.
 
+> **Scope limitation — a stationary person is only held inside the stop radius.** Occupancy evidence is scoped to the stop range, and it is currently the *only* evidence path that works for someone who has stopped moving (their returns read as exactly 0.000 m/s and are dropped by the static filter before classification). There is no occupancy check in the caution band. The practical consequence, measured on the development rig: a person standing motionless between the stop and caution radii produces no evidence at all and the zone falls to CLEAR while they are still standing there. Inside the stop radius the hold is solid — verified holding continuously for 30+ seconds and releasing cleanly on exit.
+>
+> This also means the stop radius is doing two different jobs at once: it is the safety boundary you publish, and it is the sensing window for presence evidence. Those want different values — a radius wide enough to catch a person standing at the boundary also sweeps in more static clutter, which on a moving arm makes false holds more likely. Splitting them into independent parameters is on the roadmap. Until then, set `stop_range_m` with both roles in mind and verify both directions after changing it: that STOP holds while someone stands still, *and* that it releases once they leave.
+
 **Micro-Doppler sway** (implemented, but needs a tuned profile): a stationary person generates involuntary movement — weight shifts, postural micro-corrections — in the 0.02–0.25 m/s range. **This is not detectable on the example profile in this repo.** With `frameCfg numLoops = 16`, one doppler bin is ~0.598 m/s wide, so a stationary person's returns quantize to exactly 0.000 m/s and the entire sway band falls inside a single bin. Measured on IWR6843AOP hardware: observed velocities land only on bin boundaries, nothing between. A profile with finer velocity resolution brings sway into reach. See [Chirp profile and velocity resolution](#chirp-profile-and-velocity-resolution).
 
 **Background model novelty** (optional, `--bg-learn`, off by default in the ROS 2 node): a novel occupied voxel in the hazard zone keeps the hold active. Powerful, but see the pose caveat under [Background learning](#background-learning) — the background model voxelizes in the sensor frame, so on a rotating mount this path can hold STOP indefinitely if the arm is at a different angle than when the map was learned.
@@ -181,7 +185,39 @@ velocity resolution   0.598 m/s  <-- one doppler bin, at frameCfg numLoops = 16
 
 **Consequence:** anything slower than ~0.3 m/s radial rounds to exactly 0.000 m/s and is then dropped by the static filter. A person must approach at nearly 0.6 m/s — a brisk step — to register at all. A slow, deliberate approach may not trigger CAUTION.
 
-`numLoops` (the `16` in `frameCfg 0 2 16 0 100 1 0`) sets the doppler bin count and is the parameter that governs this. Raising it improves velocity resolution proportionally; the frame dwell scales with it but stays well inside the 100 ms frame period at any practical value, so finer resolution costs no frame rate here. More integration does change the noise floor, so `cfarCfg` thresholds need revisiting alongside it — the two are tuned together, not independently. The kit's production profile ships with this tuning already validated against real mount clutter and per-board calibration.
+`numLoops` (the `16` in `frameCfg 0 2 16 0 100 1 0`) sets the doppler bin count and is the parameter that governs this. Raising it improves velocity resolution proportionally; the frame dwell scales with it but stays well inside the 100 ms frame period at any practical value, so finer resolution costs no frame rate here. More integration does change the noise floor, so `cfarCfg` thresholds need revisiting alongside it — the two are tuned together, not independently. There is an upper bound: past a certain loop count the radar cube no longer fits and the sensor accepts the config but never produces frames. The kit's production profile ships with this tuning already done and measured against real mount clutter.
+
+**If you retune the profile, retune the pipeline with it.** The two are coupled and it is easy to change one and see no benefit. Measured on the development rig: doubling `numLoops` halved the doppler bin, but `static_filter_mps` was still set to its old value of 0.3 m/s — just above the new bin 1 — so every slow-approach return was still discarded and detection behaviour did not change at all. Lowering the static filter to roughly half the new bin width is what actually unlocked slow-approach detection.
+
+Two more findings from tuning this profile on hardware, both of which cost real debugging time:
+
+- **The range and doppler CFAR thresholds are not symmetric.** Tightening the *range* CFAR measurably improved mount and bracket clutter rejection. Applying the same increase to the *doppler* CFAR made detection substantially worse — a slow approach only registered at near-touching distance, and point counts on a person collapsed. Tune them separately, and treat a change that improves clutter rejection while thinning real returns as a regression.
+- **`cfarFovCfg` in the doppler domain is a hard gate on reported velocity.** The example profile's `-1 1` window silently discards anything faster than 1 m/s, which includes a genuine fast approach — the case a safety system most needs to catch. Widen it to cover your fast-approach threshold with margin, staying inside the profile's max unambiguous velocity.
+
+### Editing the chirp profile
+
+The config is not firmware. It is a list of CLI commands the already-flashed out-of-box demo accepts over the CLI UART on every boot — which is why the file opens with `sensorStop` / `flushCfg` and closes with `sensorStart`. Editing it needs no flashing mode and no SOP jumper change; drop in the new file and restart the driver.
+
+**A `Done` reply does not mean the line was sane.** The CLI parser validates syntax, not consistency with the rest of the profile. A `cfarCfg` doppler window larger than the available doppler bin count is accepted with `Done`, and the sensor then stops producing frames entirely — no error, no output, just silence on the data port. If frames stop after a profile edit, suspect a line that was accepted but is not internally consistent, and bisect by reverting one line at a time.
+
+To see what the firmware actually replies, send the profile by hand with the driver stopped:
+
+```bash
+python3 -c "
+import serial,time
+s=serial.Serial('/dev/foreforce-radar-cli',115200,timeout=0.3)
+s.reset_input_buffer()
+for line in open('configs/profile_AOP.cfg'):
+    line=line.strip()
+    if not line or line.startswith('%'): continue
+    s.write((line+'\r\n').encode()); s.flush(); time.sleep(0.1)
+    print(line, '->', repr(s.read(300)))
+"
+```
+
+Two things to know before you trust the output. Only one process can hold the CLI port — if the driver is still running it consumes every reply and you will see empty responses on every line, including `sensorStop`, which looks like a dead sensor rather than a busy port. And if the port has genuinely hung (or a failed `sensorStart` left the sensor wedged), stopping the terminals is not enough: power-cycle the EVM.
+
+The example profile includes a `bpmCfg` line that the out-of-box demo build does not recognize. It is harmless — BPM is disabled anyway — but it prints a `not recognized` error during config send.
 
 ### Known limitations (standalone)
 
@@ -304,6 +340,10 @@ cd src && python3 zone_monitor.py
 
 Terminals 1 and 2 are order-independent, but both should be up before the safety node. If you relaunch a node, confirm the old process actually exited (`ps aux | grep dntd_mmwave`) — two safety nodes publishing to `/dntd/safety_zone` will race, and the symptom looks like erratic zone behaviour rather than an error.
 
+**The `/joint_states` watchdog has no startup grace period.** It can fault before DDS discovery has matched the subscription, so the safety node may come up, immediately raise `SAFETY FAULT: joint_states: no data received yet`, and latch STOP — even when the arm controller is running and publishing steadily. Discovery latency varies, so this is intermittent: the same command can succeed on one attempt and fault on the next. If it happens, leave the arm controller running, wait a couple of seconds, and relaunch the safety node. The error names `joint_states`, which points at the wrong subsystem — the publisher is usually fine. Adding a startup grace period is on the roadmap.
+
+Also worth knowing during bring-up: the driver reports `Config sent cleanly` based on the send completing, not on reading the firmware's replies. A profile containing a rejected or inconsistent line produces the same message and then no frames. If the driver looks healthy but nothing is detected, check `frames_published` on `/dntd/mmwave/diagnostics` before suspecting the pipeline — it counts frames at the UART, so zero there isolates the problem to the sensor or the profile.
+
 Stand clear during background learning (default 15 s, status on `/dntd/safety_fault`). After learning completes, walk toward the sensor — CLEAR → CAUTION → STOP.
 
 `zone_monitor.py` is preferred over `ros2 topic echo /dntd/safety_zone` for anything you're watching live: the topic is `TRANSIENT_LOCAL`, so `echo` will happily display a stale retained message and give no indication whether the node is still publishing. Anything subscribing to `/dntd/safety_zone` must match `RELIABLE` + `TRANSIENT_LOCAL` QoS or it will silently receive nothing.
@@ -397,7 +437,12 @@ sensor_mount_link: "torso_link"  # humanoid chest mount
 - [x] Hardware validation — full pipeline on a live arm: approach → STOP, stand still → held, step away → clean release
 - [ ] **`joint_geometry` chain loader** — declare and consume the YAML block (currently dropped; chain falls back to placeholder). Unblocks swept-volume and multi-joint ego-motion.
 - [ ] **World-frame background voxelization** — transform positions via FK before the background model. Removes relearn-on-pose-change and re-enables novelty as presence-hold evidence.
-- [ ] **Chirp profile tuning** — finer velocity resolution plus matched `cfarCfg` thresholds. Biggest single win for slow-approach detection.
+- [x] Chirp profile tuning — finer velocity resolution plus matched range `cfarCfg` and doppler FOV, validated on hardware for slow and fast approach. Example profile in this repo remains the untuned bring-up config.
+- [ ] **Independent presence-hold radius** — occupancy evidence is currently hardwired to `stop_range_m`, so the safety boundary and the sensing window cannot be tuned separately. Default should stay coupled; the override should exist.
+- [ ] **Occupancy evidence in the caution band** — a motionless person between the stop and caution radii is currently not held.
+- [ ] `joint_states` watchdog startup grace period — currently can fault on DDS discovery latency before any real fault exists.
+- [ ] Driver should validate the firmware's config replies rather than reporting a clean send unconditionally.
+- [ ] `diagnostic_log_enabled` parameter — the 1 Hz diagnostic log is currently unconditional, and its zone label and reason string can disagree (a STOP line can carry a caution reason).
 - [ ] Kinematic chain from real arm URDF (current default is UR5 placeholder geometry)
 - [ ] Micro-doppler classifier — ML weights replacing rule-based scoring (Phase 6b)
 - [ ] 3-sensor 120° forearm array fusion — 3× IWR6843AOP at 120° spacing

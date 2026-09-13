@@ -130,7 +130,7 @@ dntd_mmwave_safety:
     stop_range_m:       0.5
     caution_range_m:    1.2
     fast_approach_mps:  -0.8
-    static_filter_mps:  0.3
+    static_filter_mps:  0.15
     min_snr_db:         8.0
 
 
